@@ -2,6 +2,8 @@ name: Packages
 
 # Checks upstream every 30 minutes. GitHub may delay scheduled runs during
 # peak hours; the `workflow_dispatch` trigger is available for manual runs.
+# A scheduled run that starts while an earlier one is still going skips itself
+# (see the `guard` job) instead of queueing behind it.
 on:
   schedule:
     - cron: "*/30 * * * *"
@@ -25,18 +27,61 @@ permissions:
   contents: write
   # Smoke-test failures open (or update) an issue with diagnostic logs.
   issues: write
-
-concurrency:
-  group: packages-${{ github.ref }}
-  cancel-in-progress: false
+  # The guard job lists this workflow's runs to spot an older one still going.
+  actions: read
 
 env:
   REPO_DB: arch-repo
   KEEP_VERSIONS: "3"
 
 jobs:
+  # A scheduled tick that lands while an earlier run is still working would only
+  # re-check the same upstream state, so it skips itself instead of queueing
+  # behind the older run. Pushes and manual runs are never skipped: they carry
+  # intent (hand-edited PKGBUILDs, an explicit rebuild) that a later tick would
+  # not reproduce.
+  guard:
+    name: Skip when an older run is still going
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Runs come newest first, so the first page covers anything that could
+          # still be going: 100 runs is over two days at the 30-minute cadence.
+          # A failed lookup must not silently disable the check, but it must not
+          # fail the run either: fall back to running the check as usual.
+          if ! older=$(gh api \
+            "/repos/$REPO/actions/workflows/packages.yml/runs?per_page=100" \
+            --jq '[.workflow_runs[]
+                   | select(.id < (env.RUN_ID | tonumber))
+                   | select(.status == "in_progress"
+                            or .status == "queued"
+                            or .status == "waiting")]
+                  | length'); then
+            echo "::warning::could not list this workflow's runs; running the check anyway"
+            older=0
+          fi
+          if (( older > 0 )); then
+            echo "proceed=false" >>"$GITHUB_OUTPUT"
+            echo "::notice::an older run is still in progress; skipping this scheduled check"
+          else
+            echo "proceed=true" >>"$GITHUB_OUTPUT"
+          fi
+
   plan:
     name: Check upstream versions
+    needs: guard
+    # `always()` so a skipped guard (push, manual run) still plans; the guard
+    # only ever vetoes by writing proceed=false.
+    if: always() && needs.guard.outputs.proceed != 'false'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -314,6 +359,13 @@ jobs:
 
   publish:
     name: Publish repository
+    # The only job that touches shared state (the bucket and `main`), so it is
+    # the only one that must not overlap. Runs that reach this point queue here
+    # rather than at the workflow level, which is what lets a newer scheduled
+    # run start early enough to notice the older one and skip itself.
+    concurrency:
+      group: packages-publish
+      cancel-in-progress: false
     # Publishing waits for the smoke job so a package rebuilt by the retry is
     # what gets shipped. A failed smoke test does not block publishing. When a
     # run only re-checked published builds and nothing was rebuilt, publish

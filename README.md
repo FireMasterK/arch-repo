@@ -336,8 +336,14 @@ To test only the version checks on the host (needs `bash`, `curl`, `jq`, and
   fail.
 - `workflow_dispatch` lets you run a check on demand, with an optional package
   filter and `force` rebuild.
-- A `concurrency` group prevents overlapping runs from racing on the bucket
-  or on `main`.
+- A scheduled run that starts while an earlier run is still going skips itself
+  (the `guard` job) rather than queueing behind it, so a long build does not
+  leave a backlog of ticks that each re-check the same upstream state. Pushes
+  and manual runs are never skipped.
+- The `publish` job has its own `concurrency` group, so the only step that
+  touches the bucket and `main` never overlaps. Everything before it runs
+  independently, which is what lets a newer run start early enough to notice
+  the older one.
 
 ## Signing
 
