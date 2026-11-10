@@ -290,8 +290,13 @@ rm -f "$assets_json" "$delete_list"
 # Commit the refreshed PKGBUILDs and baselines so the repo records what was
 # shipped. Untracked files count too: a baseline is new the first time.
 cd "$root"
-if [[ -n $(git status --porcelain -- packages) ]]; then
-  pkg_list=$(git status --porcelain -- packages | awk '{print $2}' | awk -F/ '{print $2}' | sort -u | paste -sd, -)
+# Capture the status first: inside a command substitution a failing git (for
+# example "dubious ownership" when the checkout is owned by another user) would
+# look like a clean tree and silently skip the commit.
+pkg_status=$(git status --porcelain -- packages) ||
+  die 'git status failed; cannot record the shipped PKGBUILDs'
+if [[ -n $pkg_status ]]; then
+  pkg_list=$(printf '%s\n' "$pkg_status" | awk '{print $2}' | awk -F/ '{print $2}' | sort -u | paste -sd, -)
   git config user.name 'github-actions[bot]'
   git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
   git add packages
