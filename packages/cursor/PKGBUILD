@@ -2,14 +2,14 @@
 # Based on the AUR cursor-bin package.
 
 pkgname=cursor
-pkgver=3.28.7
+pkgver=3.29.15
 pkgrel=1
 pkgdesc='AI-first coding environment'
 arch=('x86_64')
 url='https://www.cursor.com'
 license=('LicenseRef-Cursor_EULA')
 # Upstream uses a newer Electron than the bundled VSCode, so use the system one.
-_electron=electron42
+_electron=electron43
 depends=(
   xdg-utils
   ripgrep
@@ -24,7 +24,7 @@ conflicts=('cursor-bin')
 options=(!strip !debug) # Do not break the VSCode extension host.
 
 # Updated by update.sh from cursor.com/api/download.
-_commit=25b52e7d03ebf2d5608914158e119f7992432a34
+_commit=86776fcb52ca505783155631089b65d646f9b03f
 _deb="cursor_${pkgver}_amd64.deb"
 
 source=(
@@ -32,7 +32,7 @@ source=(
   "https://gitlab.archlinux.org/archlinux/packaging/packages/code/-/raw/main/code."{sh,mjs}
   rg.sh
 )
-sha256sums=('4610c4915aff5ddd2b637e2ff3f48490e258239f4bfa34869b9ab2f0be5f38d0'
+sha256sums=('bc2d010514ce079bc55acff0332757e311e18b0da48dc24dc364bc8f695c11e5'
             '5da1525b5fe804b9192c05e1cbf8d751d852e3717fb2787c7ffe98fd5d93e8c1'
             '1ffe389c5caeb1b022cd5ee8616cab62fba168c5efba88d119db9b483878b941'
             '726022284725e2e971a17b9f900b90ae993ee70127fca2f6adb89e2f7e0a3610')
