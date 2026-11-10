@@ -1,0 +1,15 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Etc/UTC",
+  "packageRules": [
+    {
+      "description": "Keep the workflow's action versions current; one grouped PR a week, and only for releases that have had a few days to prove themselves",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "schedule": ["before 6am on monday"],
+      "minimumReleaseAge": "3 days",
+      "pinDigests": false
+    }
+  ]
+}

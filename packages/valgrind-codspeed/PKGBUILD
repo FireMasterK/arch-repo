@@ -1,0 +1,111 @@
+# Maintainer: Kavin <20838718+FireMasterK@users.noreply.github.com>
+# Based on the AUR valgrind-codspeed package.
+
+pkgname=valgrind-codspeed
+pkgver=3.26.0_0codspeed12
+pkgrel=1
+pkgdesc='Fork of Valgrind to be used in Codspeed (x86-64-v3, LTO, mold)'
+arch=('x86_64')
+url='https://github.com/CodSpeedHQ/valgrind-codspeed'
+license=('GPL-2.0-or-later')
+depends=('glibc' 'perl' 'debuginfod')
+makedepends=('cmake' 'docbook-xsl' 'libxslt' 'gdb' 'mold')
+checkdepends=('procps-ng')
+provides=('valgrind')
+conflicts=('valgrind')
+replaces=('valgrind')
+options=('!emptydirs' '!strip' '!lto')
+
+# CachyOS' compiler flags (pacman/makepkg.conf), pinned to the x86-64-v3
+# baseline instead of -march=native so the package stays portable, and linked
+# with mold. Valgrind's own build adds -Werror; the flags below are clean in
+# that setup.
+_cflags=(
+  -march=x86-64-v3 -mtune=generic -O3 -pipe
+  -fno-plt -fexceptions
+  -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security
+  -fstack-clash-protection -fcf-protection
+)
+_cxxflags=("${_cflags[@]}" -Wp,-D_GLIBCXX_ASSERTIONS)
+_ldflags=(
+  -Wl,-O1 -Wl,--sort-common -Wl,--as-needed
+  -Wl,-z,relro -Wl,-z,now -Wl,-z,pack-relative-relocs
+  -fuse-ld=mold
+)
+
+# Commit that the fork's third_party/capstone submodule points at.
+# update.sh refreshes it from GitHub when the fork is bumped.
+_capstone=022575848782a4801fd150fdbc927effcbca0864
+
+_upstream="valgrind-codspeed-${pkgver//_/-}"
+
+source=(
+  "${_upstream}.tar.gz::https://github.com/CodSpeedHQ/valgrind-codspeed/archive/refs/tags/${pkgver//_/-}.tar.gz"
+  "capstone-${_capstone}.tar.gz::https://github.com/capstone-engine/capstone/archive/${_capstone}.tar.gz"
+)
+sha256sums=('486bfcf880e5d6c084a2e55533026791511ab3be015b129e730931ec85ef17b0'
+            '1b0d7efa450e766c120a8dfcf9b539f1e120925fc1478fbe125d6d52bae0c506')
+
+prepare() {
+  cd "$_upstream"
+
+  # Capstone's in-tree libc shims must not expand glibc's fortified macros.
+  sed -i '/#include <string.h>/a\
+#undef strchr\
+#undef strrchr\
+#undef strstr' callgrind/cycledecode_capstone.c
+
+  # gcc warns about the deliberately huge alloc-size bound, tripping -Werror.
+  sed -i 's/AC_GCC_WARNING_SUBST_NO(\[alloc-size-larger-than=18446744073709551615\], \[FLAG_W_NO_ALLOC_SIZE_LARGER_THAN\])/AC_SUBST([FLAG_W_NO_ALLOC_SIZE_LARGER_THAN], [])/' configure.ac
+
+  # Point the manpage target at Arch's docbook-xsl stylesheets.
+  sed -i '/XSL_MAN_STYLES = \\/a\
+    /usr/share/xml/docbook/xsl-stylesheets/manpages/docbook.xsl \\' docs/Makefile.am
+
+  autoreconf -ifv
+}
+
+build() {
+  # Capstone must be built without stack-protector or fortify: the Callgrind
+  # tool links -nodefaultlibs and runs without glibc's %fs TLS. It still gets
+  # the optimisation flags, since it decodes every basic block.
+  cmake -S "capstone-${_capstone}" -B capstone-build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCAPSTONE_ARCHITECTURE_DEFAULT=OFF \
+    -DCAPSTONE_X86_SUPPORT=ON \
+    -DCAPSTONE_ARM64_SUPPORT=ON \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DCAPSTONE_BUILD_CSTOOL=OFF \
+    -DCAPSTONE_BUILD_TESTS=OFF \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DCMAKE_INSTALL_PREFIX="$srcdir/capstone-static" \
+    -DCMAKE_C_FLAGS="-march=x86-64-v3 -mtune=generic -O3 -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fPIC"
+  cmake --build capstone-build
+  cmake --install capstone-build
+
+  cd "$_upstream"
+
+  export CFLAGS="${_cflags[*]}"
+  export CXXFLAGS="${_cxxflags[*]}"
+  export LDFLAGS="${_ldflags[*]}"
+
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --libexecdir=/usr/lib \
+    --mandir=/usr/share/man \
+    --enable-only64bit \
+    --enable-lto=yes \
+    --with-capstone="$srcdir/capstone-static"
+  make -j"$(nproc)"
+  make -C docs man-pages
+}
+
+package() {
+  cd "$_upstream"
+
+  make DESTDIR="$pkgdir" install
+
+  install -Dm644 docs/*.1 -t "$pkgdir/usr/share/man/man1"
+}

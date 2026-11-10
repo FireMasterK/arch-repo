@@ -1,0 +1,30 @@
+# Maintainer: Kavin <20838718+FireMasterK@users.noreply.github.com>
+# Based on the AUR codspeed-bin package.
+
+pkgname=codspeed
+pkgver=5.6.3
+pkgrel=1
+pkgdesc='CodSpeed test runner'
+arch=('x86_64')
+url='https://github.com/CodSpeedHQ/codspeed'
+license=('MIT' 'Apache-2.0')
+depends=('gcc-libs' 'glibc' 'openssl' 'lsb-release' 'valgrind-codspeed')
+provides=('codspeed-bin')
+conflicts=('codspeed-bin')
+replaces=('codspeed-bin')
+
+# Upstream publishes a statically linked musl runner for every release.
+_asset="codspeed-runner-x86_64-unknown-linux-musl"
+
+source=(
+  "${_asset}.tar.gz::https://github.com/CodSpeedHQ/codspeed/releases/download/v${pkgver}/${_asset}.tar.gz"
+)
+sha256sums=('f29532a5cbcb3462bc5d6bcf5570ddb8c8cbfffed579cb48c35d3910ed5f7f00')
+
+package() {
+  install -Dm755 "${_asset}/codspeed" "$pkgdir/usr/bin/codspeed"
+  install -Dm644 "${_asset}/LICENSE-APACHE" \
+    "$pkgdir/usr/share/licenses/${pkgname}/LICENSE-APACHE"
+  install -Dm644 "${_asset}/LICENSE-MIT" \
+    "$pkgdir/usr/share/licenses/${pkgname}/LICENSE-MIT"
+}

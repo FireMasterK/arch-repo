@@ -1,0 +1,369 @@
+name: Packages
+
+# Checks upstream every 30 minutes. GitHub may delay scheduled runs during
+# peak hours; the `workflow_dispatch` trigger is available for manual runs.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "Space-separated package names (empty = all)"
+        type: string
+        default: ""
+      force:
+        description: "Rebuild even when upstream is unchanged (bumps pkgrel)"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "packages/**"
+      - "scripts/**"
+
+permissions:
+  contents: write
+  # Smoke-test failures open (or update) an issue with diagnostic logs.
+  issues: write
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REPO_DB: arch-repo
+  KEEP_VERSIONS: "3"
+
+jobs:
+  plan:
+    name: Check upstream versions
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      has_updates: ${{ steps.plan.outputs.has_updates }}
+      test_matrix: ${{ steps.plan.outputs.test_matrix }}
+      has_tests: ${{ steps.plan.outputs.has_tests }}
+      # Packages with a build() function; only those can use the ccache.
+      source_matrix: ${{ steps.plan.outputs.source_matrix }}
+      # package -> pkgver, used to key the source-download cache.
+      versions: ${{ steps.plan.outputs.versions }}
+      failed: ${{ steps.plan.outputs.failed }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Some upstreams (x.ai/bot) only serve the page to a browser TLS
+      # fingerprint, so the updaters use curl-impersonate when it is on PATH.
+      # The fingerprint ages out as browser profiles change, so resolve the
+      # newest release on every run instead of pinning one here. The plan job
+      # runs every 30 minutes, so keep the extracted binary in the Actions
+      # cache keyed by that version rather than downloading it every check.
+      - name: Resolve the latest curl-impersonate
+        id: curl-impersonate-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          api=https://api.github.com/repos/lexiforest/curl-impersonate
+          release=$(curl -fsSL --retry 2 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$api/releases/latest")
+
+          version=$(jq -r '.tag_name' <<<"$release")
+          # Only the curl-impersonate tarball, not its libcurl-impersonate sibling.
+          asset=$(jq -r --arg suffix '.x86_64-linux-gnu.tar.gz' '
+            .assets[]
+            | select(.name | startswith("curl-impersonate-") and endswith($suffix))
+            | "\(.browser_download_url) \(.digest)"' <<<"$release")
+          if [[ -z $version || $version == null || $(grep -c . <<<"$asset") -ne 1 ]]; then
+            echo "::error::latest curl-impersonate release has no unique x86_64-linux-gnu asset"
+            exit 1
+          fi
+
+          url=${asset% *}
+          sha256=${asset##*sha256:}
+          if [[ ! $sha256 =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::latest curl-impersonate release publishes no sha256 for $url"
+            exit 1
+          fi
+
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "url=$url" >>"$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >>"$GITHUB_OUTPUT"
+
+      - name: Restore curl-impersonate
+        id: curl-impersonate
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/curl-impersonate
+          key: curl-impersonate-${{ steps.curl-impersonate-release.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install curl-impersonate
+        if: steps.curl-impersonate.outputs.cache-hit != 'true'
+        env:
+          CURL_IMPERSONATE_URL: ${{ steps.curl-impersonate-release.outputs.url }}
+          CURL_IMPERSONATE_SHA256: ${{ steps.curl-impersonate-release.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/curl-impersonate"
+          archive="$RUNNER_TEMP/curl-impersonate.tar.gz"
+
+          curl -fsSL --retry 2 "$CURL_IMPERSONATE_URL" -o "$archive"
+          echo "$CURL_IMPERSONATE_SHA256  $archive" | sha256sum -c -
+          mkdir -p "$dest"
+          tar -xzf "$archive" -C "$dest"
+
+          "$dest/curl-impersonate" --version >/dev/null
+
+      - name: Add curl-impersonate to PATH
+        run: echo "$RUNNER_TEMP/curl-impersonate" >>"$GITHUB_PATH"
+
+      - name: Run package updaters
+        id: plan
+        env:
+          PACKAGES: ${{ inputs.packages }}
+          # A push might contain hand-edited PKGBUILDs, so rebuild everything
+          # it touches with a pkgrel bump (no way to know if content changed).
+          FORCE: ${{ (inputs.force || github.event_name == 'push') && 'true' || 'false' }}
+          # Updaters that query the GitHub API use this for a higher rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./scripts/plan-updates.sh
+
+      - name: Report updater failures
+        if: steps.plan.outputs.failed != ''
+        run: |
+          echo "::error::Updater failed for: ${{ steps.plan.outputs.failed }}"
+          exit 1
+
+  build:
+    name: Build ${{ matrix.package }}
+    needs: plan
+    # Build whatever was detected even if one unrelated updater failed.
+    if: always() && needs.plan.outputs.has_updates == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      # Kept inside the workspace so the caches below can persist them between
+      # runs (and the smoke job can reuse them for its retry build).
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      SRCDEST: ${{ github.workspace }}/.srcdest
+    steps:
+      # actions/checkout needs git, which is not in the base-devel image.
+      - name: Bootstrap container
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm git
+
+      # Saving the ccache once per package version and compiler version (rather
+      # than once per run) keeps old compiler results from filling the 10 GiB
+      # cache budget.
+      - name: Read the compiler version
+        id: compiler
+        run: echo "version=$(pacman -Q gcc | cut -d' ' -f2)" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+
+      # Compiling Valgrind dominates a run; ccache turns an unchanged compile
+      # into a cache hit even after the container was rebuilt. Binary repacks
+      # (cursor, grok-bot, codspeed) have no build() and skip this.
+      - name: Restore ccache
+        if: contains(fromJSON(needs.plan.outputs.source_matrix), matrix.package)
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ matrix.package }}-${{ fromJSON(needs.plan.outputs.versions)[matrix.package] }}-${{ steps.compiler.outputs.version }}
+          restore-keys: |
+            ccache-${{ matrix.package }}-
+
+      # Cursor's deb alone is ~225 MiB. updpkgsums and makepkg reuse files in
+      # SRCDEST, so a same-version rebuild (push, force, smoke retry) does not
+      # download them again. Keyed by version: a new upstream release must not
+      # restore the old release's sources just to delete them again.
+      - name: Restore makepkg downloads
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.SRCDEST }}
+          key: srcdest-${{ matrix.package }}-${{ fromJSON(needs.plan.outputs.versions)[matrix.package] }}
+
+      - name: Build package
+        env:
+          PACKAGES: ${{ matrix.package }}
+          FORCE: ${{ (inputs.force || github.event_name == 'push') && 'true' || 'false' }}
+        run: bash "$GITHUB_WORKSPACE/scripts/container-build.sh"
+
+      # Keep the download cache lean: drop any file the version just built does
+      # not reference, so a cache that outlives its sources stays small.
+      - name: Prune the download cache
+        if: always()
+        run: bash "$GITHUB_WORKSPACE/scripts/prune-srcdest.sh" "${{ matrix.package }}"
+
+      - name: Show ccache statistics
+        if: always() && contains(fromJSON(needs.plan.outputs.source_matrix), matrix.package)
+        run: command -v ccache >/dev/null && ccache --show-stats || true
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pkg-${{ matrix.package }}
+          path: out/*
+          compression-level: 0
+          if-no-files-found: error
+
+  smoke:
+    name: Smoke test ${{ matrix.package }}
+    needs: [plan, build]
+    # Runs for every package built in this run, and for source packages whose
+    # published build is re-checked when its dependencies moved on.
+    if: always() && needs.plan.outputs.has_tests == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.plan.outputs.test_matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # A failed check rebuilds the package (scripts/smoke-with-retry.sh), so
+      # reuse the build job's ccache and downloads when this run built them.
+      # Restore-only: the smoke job never needs to save these.
+      - name: Restore ccache for a retry rebuild
+        if: contains(fromJSON(needs.plan.outputs.source_matrix), matrix.package)
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ matrix.package }}-${{ fromJSON(needs.plan.outputs.versions)[matrix.package] }}
+          restore-keys: |
+            ccache-${{ matrix.package }}-
+
+      - name: Restore makepkg downloads for a retry rebuild
+        if: contains(fromJSON(needs.plan.outputs.source_matrix), matrix.package)
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ github.workspace }}/.srcdest
+          key: srcdest-${{ matrix.package }}-${{ fromJSON(needs.plan.outputs.versions)[matrix.package] }}
+
+      # Sibling packages (e.g. codspeed -> valgrind-codspeed) may be needed to
+      # satisfy dependencies inside the test container. A package that was not
+      # built in this run is re-checked from the published repository instead.
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          path: _artifacts
+          pattern: pkg-*
+          merge-multiple: true
+
+      - name: Start package in a headless Wayland environment
+        id: smoke
+        env:
+          PKG_DIR: _artifacts
+          PACKAGE: ${{ matrix.package }}
+          REPO_DB: ${{ env.REPO_DB }}
+          S3_PUBLIC_BASE_URL: ${{ vars.S3_PUBLIC_BASE_URL }}
+        run: |
+          rc=0
+          bash "$GITHUB_WORKSPACE/scripts/smoke-package.sh" "$PACKAGE" || rc=$?
+          if (( rc == 2 )); then
+            echo "::notice title=Smoke test skipped::$PACKAGE needs no startup check in this run"
+            exit 0
+          fi
+          exit "$rc"
+
+      - name: Note that the package was rebuilt
+        if: steps.smoke.outcome == 'success' && steps.smoke.outputs.rebuilt == 'true'
+        run: |
+          echo "::warning title=Package rebuilt::${{ matrix.package }} failed its startup check, \
+          was rebuilt against current Arch packages and now passes. The rebuilt package is published."
+
+      # A package rebuilt by the retry (whether or not it then passed) lands
+      # here; the publish job prefers it over the original build of that version.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: retry-${{ matrix.package }}
+          path: |
+            out/*.pkg.tar.zst
+            out/PKGBUILD.*
+            out/SRCINFO.*
+          compression-level: 0
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: smoke-logs-${{ matrix.package }}-${{ github.run_attempt }}
+          path: smoke-logs/
+          if-no-files-found: warn
+
+      - name: Open an issue with the failure logs
+        if: steps.smoke.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          LOG_SUBDIR: ${{ steps.smoke.outputs.log_subdir }}
+        run: bash "$GITHUB_WORKSPACE/scripts/report-smoke-failure.sh" "${{ matrix.package }}"
+
+      - name: Fail the job
+        if: steps.smoke.outcome == 'failure'
+        run: exit 1
+
+  publish:
+    name: Publish repository
+    # Publishing waits for the smoke job so a package rebuilt by the retry is
+    # what gets shipped. A failed smoke test does not block publishing. When a
+    # run only re-checked published builds and nothing was rebuilt, publish
+    # finds no artifacts and exits without touching the repository.
+    needs: [plan, build, smoke]
+    if: >-
+      always() &&
+      (needs.plan.outputs.has_updates == 'true' || needs.plan.outputs.has_tests == 'true') &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Bootstrap container
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm git
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          path: _artifacts
+          pattern: pkg-*
+          merge-multiple: true
+
+      # Packages rebuilt by a smoke retry; empty when nothing was rebuilt.
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          path: _retry
+          pattern: retry-*
+          merge-multiple: true
+
+      - name: Publish packages
+        env:
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
+          S3_REGION: ${{ vars.S3_REGION }}
+          S3_PREFIX: ${{ vars.S3_PREFIX }}
+          S3_ADDRESSING_STYLE: ${{ vars.S3_ADDRESSING_STYLE }}
+          S3_PUBLIC_BASE_URL: ${{ vars.S3_PUBLIC_BASE_URL }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # With no upstream update the only artifacts are smoke-test rebuilds,
+          # so an empty _artifacts means "nothing to do", not "build broke".
+          EXPECT_ARTIFACTS: ${{ needs.plan.outputs.has_updates }}
+        run: bash "$GITHUB_WORKSPACE/scripts/container-publish.sh"

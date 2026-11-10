@@ -1,0 +1,14 @@
+out/
+_artifacts/
+_repo/
+_retry/
+smoke-logs/
+.srcdest/
+.ccache/
+.s3-objects.json
+.s3-delete.txt
+packages/*/src/
+packages/*/pkg/
+*.pkg.tar.zst
+*.pkg.tar.zst.sig
+__pycache__/
