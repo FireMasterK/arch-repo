@@ -3,7 +3,7 @@
 
 pkgname=grok-bot
 pkgver=1.0.1
-pkgrel=1
+pkgrel=2
 pkgdesc='Grok Bot desktop agent'
 arch=('x86_64')
 url='https://cursor.com'

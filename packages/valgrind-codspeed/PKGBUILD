@@ -3,7 +3,7 @@
 
 pkgname=valgrind-codspeed
 pkgver=3.26.0_0codspeed13
-pkgrel=1
+pkgrel=2
 pkgdesc='Fork of Valgrind to be used in Codspeed (x86-64-v3, LTO, mold)'
 arch=('x86_64')
 url='https://github.com/CodSpeedHQ/valgrind-codspeed'
