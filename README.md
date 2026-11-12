@@ -13,6 +13,7 @@ Current packages:
 | `grok-bot` | [Grok Bot](https://x.ai/bot) `.deb` | hashed download link on `x.ai/bot` |
 | `codspeed` | [CodSpeed](https://github.com/CodSpeedHQ/codspeed) runner tarball | GitHub `releases/latest` |
 | `valgrind-codspeed` | [valgrind-codspeed](https://github.com/CodSpeedHQ/valgrind-codspeed) source | GitHub `releases/latest` + submodule pin |
+| `lightning-matrix` | [Lightning](https://github.com/Mizerd/lightning) source | GitHub `releases/latest` |
 
 `cursor` and `grok-bot` are binary repacks (based on the AUR `cursor-bin` /
 `grok-bot-bin` packages); `codspeed` repacks upstream's prebuilt musl runner.
@@ -33,6 +34,14 @@ It is compiled with CachyOS' flag set — `-O3 -march=x86-64-v3`, `mold`, LTO,
 `-march=native` and `-march=znver*` are avoided on purpose: the package is
 built on GitHub's Azure runners (Skylake/EPYC), so `native` would silently
 target the wrong microarchitecture.
+
+`lightning-matrix` (AUR `lightning-matrix-appimage`) is built from upstream's
+source release instead of repacking the AppImage: Qt 6/QML for the UI and the
+official Rust Matrix SDK for sync, E2EE and calls. It conflicts with the AUR
+AppImage package. The Rust crates are fetched from `Cargo.lock` in `prepare()`
+and the build then runs cargo with `--offline --locked`; the bundled updater is
+left in its `development` install type so it never replaces pacman-managed
+files.
 
 ## How it works
 
@@ -84,7 +93,8 @@ what actually changed:
 | `ccache-<package>-*` | ccache compiler results | source builds in `build`, retry rebuild in `smoke` |
 
 Only source packages (`build()` in the PKGBUILD — currently
-`valgrind-codspeed`) use ccache; the binary repacks have nothing to compile.
+`valgrind-codspeed` and `lightning-matrix`) use ccache; the binary repacks have
+nothing to compile.
 ccache is enabled through makepkg's own `ccache` `BUILDENV` in
 `scripts/container-build.sh`, so no PKGBUILD needs to change, and it is capped
 at 1 GiB (`CCACHE_MAXSIZE`). Each build job prints `ccache --show-stats`, which
@@ -137,7 +147,7 @@ Then:
 
 ```bash
 sudo pacman -Sy arch-repo
-sudo pacman -S cursor grok-bot codspeed
+sudo pacman -S cursor grok-bot codspeed lightning-matrix
 ```
 
 Pacman appends `arch-repo.db`, `arch-repo.files` and package filenames to that

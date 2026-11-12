@@ -1,0 +1,100 @@
+# Maintainer: Kavin <20838718+FireMasterK@users.noreply.github.com>
+# Based on the AUR lightning-matrix-appimage package.
+
+pkgname=lightning-matrix
+pkgver=0.10.5
+pkgrel=1
+pkgdesc='Native Qt 6 Matrix desktop client using the official Rust Matrix SDK'
+arch=('x86_64')
+url='https://www.lightning-matrix.org/'
+license=('GPL-3.0-or-later')
+depends=(
+  gcc-libs
+  glibc
+  gst-plugins-bad
+  gst-plugins-base
+  gst-plugins-good
+  gst-plugin-pipewire
+  hicolor-icon-theme
+  libnice
+  libsecret
+  openssl
+  qt6-base
+  qt6-declarative
+  qt6-multimedia
+  qt6-svg
+  qt6-wayland
+  zlib
+)
+makedepends=(
+  cmake
+  gst-plugins-bad
+  gst-plugins-base
+  gstreamer
+  libsecret
+  ninja
+  openssl
+  pkgconf
+  qt6-base
+  qt6-declarative
+  qt6-multimedia
+  qt6-svg
+  qt6-tools
+  rust
+  zlib
+)
+optdepends=(
+  'enchant: spell checking in the composer'
+  'gst-libav: additional media codecs'
+  'gst-plugins-ugly: additional media codecs'
+  'kimageformats: JPEG XL and other extra image formats'
+  'noto-fonts-emoji: colour emoji rendering'
+  'qt6-imageformats: WebP and other extra image formats'
+  'xdg-desktop-portal: screen sharing under Wayland'
+)
+conflicts=('lightning-matrix-appimage')
+options=('!debug')
+
+_upstream="lightning-${pkgver}"
+
+source=("${_upstream}.tar.gz::https://github.com/Mizerd/lightning/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('479d2730e6641379012792d1a6c5d79e66fc2e5521255da39cab46e1cad89fce')
+
+prepare() {
+  # CMake drives cargo with --offline --locked, so the crates pinned by
+  # Cargo.lock have to be in a CARGO_HOME this build owns. Fetching them here
+  # keeps the source list deterministic: Cargo.lock pins every version and
+  # checksum.
+  export CARGO_HOME="$srcdir/cargo-home"
+  mkdir -p "$CARGO_HOME"
+  cargo fetch --locked --manifest-path "$srcdir/$_upstream/rust/Cargo.toml"
+}
+
+build() {
+  export CARGO_HOME="$srcdir/cargo-home"
+
+  # The install type is left at its default "development": Arch packages are
+  # updated by pacman, so the bundled updater must never replace files itself.
+  cmake -S "$srcdir/$_upstream" -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBUILD_TESTING=OFF \
+    -DENABLE_RUST_SDK_BACKEND=ON \
+    -DLIGHTNING_RUST_ONLY=ON \
+    -DLIGHTNING_ARTIFACT_KIND=release \
+    -DLIGHTNING_ENABLE_WEBRTC=ON \
+    -DLIGHTNING_REQUIRE_WEBRTC=ON \
+    -DLIGHTNING_REQUIRE_QT_SVG=ON
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build --prefix /usr
+
+  install -Dm644 "$srcdir/$_upstream/LICENSE" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$srcdir/$_upstream/README.md" \
+    "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 "$srcdir/$_upstream/packaging-ci/packaging/common/lightning.metainfo.xml" \
+    "$pkgdir/usr/share/metainfo/lightning.metainfo.xml"
+}
