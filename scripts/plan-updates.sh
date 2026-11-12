@@ -2,9 +2,11 @@
 # Run every package's update.sh and report which packages need a rebuild.
 #
 # Outputs (to $GITHUB_OUTPUT when running in Actions):
-#   matrix       - JSON array of package names to build
-#   has_updates  - "true" when matrix is non-empty
-#   failed       - comma separated list of packages whose updater failed
+#   matrix          - JSON array of package names to build
+#   has_updates     - "true" when matrix is non-empty
+#   test_candidates - JSON array of published source packages whose dependency
+#                     drift should be checked (see scripts/plan-smoke-tests.sh)
+#   failed          - comma separated list of packages whose updater failed
 set -euo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -67,11 +69,11 @@ while IFS= read -r dir; do
   fi
 done < <(package_dirs "$root")
 
-# Packages to smoke test: everything built in this run, plus source packages
-# whose published build may no longer match the Arch packages it runs against.
-# Those are re-checked by scripts/smoke-package.sh, which compares dependency
-# versions and does nothing when they are unchanged.
-tests=("${changed[@]}")
+# Source packages whose published build may no longer match the Arch packages
+# it runs against. Packages built in this run are always tested; the rest are
+# filtered by scripts/plan-smoke-tests.sh, which compares dependency versions
+# once for the whole set so a quiet scheduled run starts no smoke jobs at all.
+candidates=()
 while IFS= read -r dir; do
   pkg=$(basename "$dir")
 
@@ -81,7 +83,7 @@ while IFS= read -r dir; do
   contains "$pkg" "${changed[@]}" && continue
   builds_from_source "$root" "$pkg" || continue
   [[ -f $dir/build-env.txt ]] || continue
-  tests+=("$pkg")
+  candidates+=("$pkg")
 done < <(package_dirs "$root")
 
 # Packages that compile from source. The build job uses this to decide which
@@ -97,9 +99,9 @@ if ((${#changed[@]})); then
   matrix=$(printf '%s\n' "${changed[@]}" | jq -R . | jq -sc .)
 fi
 
-test_matrix='[]'
-if ((${#tests[@]})); then
-  test_matrix=$(printf '%s\n' "${tests[@]}" | jq -R . | jq -sc .)
+test_candidates='[]'
+if ((${#candidates[@]})); then
+  test_candidates=$(printf '%s\n' "${candidates[@]}" | jq -R . | jq -sc .)
 fi
 
 source_matrix='[]'
@@ -127,8 +129,7 @@ emit() {
 
 emit "matrix=$matrix"
 emit "has_updates=$([[ ${#changed[@]} -gt 0 ]] && echo true || echo false)"
-emit "test_matrix=$test_matrix"
-emit "has_tests=$([[ ${#tests[@]} -gt 0 ]] && echo true || echo false)"
+emit "test_candidates=$test_candidates"
 emit "source_matrix=$source_matrix"
 emit "versions=$versions_json"
 emit "failed=$failed_csv"

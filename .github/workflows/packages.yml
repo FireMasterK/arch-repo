@@ -86,8 +86,8 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       has_updates: ${{ steps.plan.outputs.has_updates }}
-      test_matrix: ${{ steps.plan.outputs.test_matrix }}
-      has_tests: ${{ steps.plan.outputs.has_tests }}
+      test_matrix: ${{ steps.tests.outputs.test_matrix }}
+      has_tests: ${{ steps.tests.outputs.has_tests }}
       # Packages with a build() function; only those can use the ccache.
       source_matrix: ${{ steps.plan.outputs.source_matrix }}
       # package -> pkgver, used to key the source-download cache.
@@ -173,6 +173,13 @@ jobs:
           # Updaters that query the GitHub API use this for a higher rate limit.
           GITHUB_TOKEN: ${{ github.token }}
         run: ./scripts/plan-updates.sh
+
+      - name: Decide which published builds to re-check
+        id: tests
+        env:
+          BUILT: ${{ steps.plan.outputs.matrix }}
+          CANDIDATES: ${{ steps.plan.outputs.test_candidates }}
+        run: ./scripts/plan-smoke-tests.sh
 
       - name: Report updater failures
         if: steps.plan.outputs.failed != ''
@@ -262,8 +269,8 @@ jobs:
   smoke:
     name: Smoke test ${{ matrix.package }}
     needs: [plan, build]
-    # Runs for every package built in this run, and for source packages whose
-    # published build is re-checked when its dependencies moved on.
+    # Runs for every package built in this run, and for published source
+    # packages whose dependency drift was detected during planning.
     if: always() && needs.plan.outputs.has_tests == 'true'
     runs-on: ubuntu-latest
     strategy:

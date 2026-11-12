@@ -16,6 +16,9 @@
 #
 # Environment:
 #   SMOKE_IMAGE  container image used to read the current repositories
+#
+# `--dump` prints the current `pacman -Si` output and exits, so callers that
+# check many packages (scripts/plan-smoke-tests.sh) read the databases once.
 set -euo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -30,6 +33,26 @@ unavailable() {
   exit 3
 }
 
+image=${SMOKE_IMAGE:-archlinux:latest}
+
+# Refresh the sync databases so the dump describes the repositories as they are
+# right now. A full upgrade is not needed: only the versions in the repos matter.
+read_database() {
+  docker run --rm "$image" bash -c '
+    set -e
+    pacman-key --init >/dev/null 2>&1
+    pacman-key --populate archlinux >/dev/null 2>&1
+    pacman -Sy --noconfirm >/dev/null 2>&1
+    pacman -Si
+  '
+}
+
+if [[ ${1:-} == --dump ]]; then
+  command -v docker >/dev/null || unavailable 'docker is required'
+  read_database || unavailable "could not read the package databases from $image"
+  exit 0
+fi
+
 [[ $# -eq 1 ]] || die "usage: $0 <package>"
 pkg=$1
 
@@ -41,21 +64,12 @@ if [[ ! -f $baseline ]]; then
   exit 2
 fi
 
-image=${SMOKE_IMAGE:-archlinux:latest}
 command -v docker >/dev/null || unavailable 'docker is required'
 
 dump=$(mktemp "${TMPDIR:-/tmp}/pacman-si.XXXXXX")
 trap 'rm -f "$dump"' EXIT
 
-# Refresh the sync databases so the dump describes the repositories as they are
-# right now. A full upgrade is not needed: only the versions in the repos matter.
-docker run --rm "$image" bash -c '
-  set -e
-  pacman-key --init >/dev/null 2>&1
-  pacman-key --populate archlinux >/dev/null 2>&1
-  pacman -Sy --noconfirm >/dev/null 2>&1
-  pacman -Si
-' >"$dump" || unavailable "could not read the package databases from $image"
+read_database >"$dump" || unavailable "could not read the package databases from $image"
 
 rc=0
 python3 "$here/dep-drift.py" "$root" "$pkg" "$baseline" "$dump" || rc=$?

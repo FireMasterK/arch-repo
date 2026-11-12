@@ -232,6 +232,12 @@ runtime dependencies has a different version than the one it was compiled
 against — otherwise every scheduled run would start a container to prove that
 nothing changed.
 
+That decision is made while planning (`scripts/plan-smoke-tests.sh`), before the
+matrix is expanded, so packages with no drift get no smoke job at all. The Arch
+databases are read once and compared in a single process (about 1 ms per
+package, so the plan stage stays flat as the repository grows), and only
+packages with drift (or a build from this run) appear in `test_matrix`.
+
 `scripts/dep-drift.sh` compares the dependency values recorded at publish time
 (`packages/<name>/build-env.txt`, taken from the published package's
 `.BUILDINFO`) with the versions in the current Arch repositories, walking the
@@ -324,6 +330,13 @@ To test only the version checks on the host (needs `bash`, `curl`, `jq`, and
 
 ```bash
 ./scripts/plan-updates.sh
+```
+
+To see which published source builds the next run would re-check (needs
+`docker` to read the Arch databases):
+
+```bash
+BUILT='[]' CANDIDATES='["valgrind-codspeed"]' ./scripts/plan-smoke-tests.sh
 ```
 
 ## Scheduled workflow caveats
