@@ -38,6 +38,9 @@ art=$root/_artifacts
 # Packages rebuilt by the smoke-test retry live in their own artifact, so they
 # can supersede the original build of the same package.
 retry=$root/_retry
+# Dependency sets that a passing re-check proved still work; the publish job is
+# the only writer, so it records them on the branch.
+verified=$root/_verified
 repo=$root/_repo
 
 if [[ $dry_run != 1 ]]; then
@@ -61,8 +64,16 @@ if ! compgen -G "$art/*.pkg.tar.zst" >/dev/null; then
     die "no packages found in $art"
   fi
   log 'nothing to publish'
+  # A re-check that passed still has something to record: without it the plan
+  # job would re-check the same dependency drift on every run until the package
+  # is rebuilt for another reason.
+  sync_verified "$verified" "$root"
+  commit_packages "$root"
   exit 0
 fi
+
+# Records of re-checks that passed alongside packages being published here.
+sync_verified "$verified" "$root"
 
 rm -rf "$repo"
 mkdir -p "$repo"
@@ -126,6 +137,9 @@ for dir in "$root"/packages/*/; do
   bsdtar -xOf "$file" .BUILDINFO 2>/dev/null | grep '^installed = ' >"$tmp" || true
   if [[ -s $tmp ]]; then
     mv -f "$tmp" "$dir/build-env.txt"
+    # A new build starts from a fresh baseline, so what a previous re-check
+    # verified about the build it replaces no longer applies.
+    rm -f "$dir/smoke-verified.txt"
     log "recorded the build environment of $pkg ($(wc -l <"$dir/build-env.txt") packages)"
   else
     rm -f "$tmp"
@@ -289,29 +303,7 @@ rm -f "$assets_json" "$delete_list"
 
 # Commit the refreshed PKGBUILDs and baselines so the repo records what was
 # shipped. Untracked files count too: a baseline is new the first time.
-cd "$root"
-# Capture the status first: inside a command substitution a failing git (for
-# example "dubious ownership" when the checkout is owned by another user) would
-# look like a clean tree and silently skip the commit.
-pkg_status=$(git status --porcelain -- packages) ||
-  die 'git status failed; cannot record the shipped PKGBUILDs'
-if [[ -n $pkg_status ]]; then
-  pkg_list=$(printf '%s\n' "$pkg_status" | awk '{print $2}' | awk -F/ '{print $2}' | sort -u | paste -sd, -)
-  git config user.name 'github-actions[bot]'
-  git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-  git add packages
-  git commit -m "chore(packages): update ${pkg_list:-metadata}"
-  pushed=false
-  for attempt in 1 2 3; do
-    if git push origin "HEAD:${GITHUB_REF_NAME:-main}"; then
-      pushed=true
-      break
-    fi
-    git pull --rebase --autostash || true
-    sleep $((attempt * 5))
-  done
-  $pushed || die 'failed to push the updated PKGBUILDs'
-fi
+commit_packages "$root"
 
 if [[ -n ${S3_PUBLIC_BASE_URL:-} ]]; then
   log "published to ${S3_PUBLIC_BASE_URL%/}/"

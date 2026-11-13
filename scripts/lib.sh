@@ -119,3 +119,49 @@ published_filename() {
   grep -E '^[^/]+\.pkg\.tar\.zst$' <<<"$names" |
     grep -E "^${name}-[0-9]" | sort -V | tail -n 1
 }
+
+# sync_verified <verified-dir> <repo-root>
+# Copies the verified-dependency records written by a passing re-check
+# (`.smoke-verified/<package>.txt`) into packages/<package>/smoke-verified.txt,
+# where the plan job reads them to skip a drift set that already passed.
+sync_verified() {
+  local verified=$1 root=$2 file pkg
+  [[ -d $verified ]] || return 0
+  for file in "$verified"/*.txt; do
+    [[ -f $file ]] || continue
+    pkg=$(basename "$file" .txt)
+    [[ -f $root/packages/$pkg/PKGBUILD ]] || continue
+    cp -f "$file" "$root/packages/$pkg/smoke-verified.txt"
+    log "$pkg: recorded that this dependency set passed its re-check"
+  done
+}
+
+# commit_packages <repo-root>
+# Records the shipped package metadata (refreshed PKGBUILDs, dependency
+# baselines and verified-dependency records) on the branch. Publishing is the
+# only writer, so this is the only place that commits.
+commit_packages() {
+  local root=$1 pkg_status pkg_list pushed=false attempt
+  # Capture the status first: inside a command substitution a failing git (for
+  # example "dubious ownership" when the checkout is owned by another user)
+  # would look like a clean tree and silently skip the commit.
+  pkg_status=$(git -C "$root" status --porcelain -- packages) ||
+    die 'git status failed; cannot record the shipped package metadata'
+  [[ -n $pkg_status ]] || return 0
+
+  pkg_list=$(printf '%s\n' "$pkg_status" | awk '{print $2}' |
+    awk -F/ '{print $2}' | sort -u | paste -sd, -)
+  git -C "$root" config user.name 'github-actions[bot]'
+  git -C "$root" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+  git -C "$root" add packages
+  git -C "$root" commit -m "chore(packages): update ${pkg_list:-metadata}"
+  for attempt in 1 2 3; do
+    if git -C "$root" push origin "HEAD:${GITHUB_REF_NAME:-main}"; then
+      pushed=true
+      break
+    fi
+    git -C "$root" pull --rebase --autostash || true
+    sleep $((attempt * 5))
+  done
+  $pushed || die 'failed to push the updated package metadata'
+}

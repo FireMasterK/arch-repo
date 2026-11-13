@@ -76,7 +76,8 @@ schedule (*/30) ─► plan ─────────► build (matrix, archli
    a missing object), prunes old versions, and commits the refreshed PKGBUILDs
    back to `main`. A package rebuilt by the smoke job replaces the original
    build of the same version. When a run only re-checked published builds and
-   nothing was rebuilt, this job exits without touching the repository.
+   nothing was rebuilt, this job leaves the bucket alone and commits at most the
+   re-check records.
 
 Because the publishing token is `GITHUB_TOKEN`, the bot's commit does not
 re-trigger the workflow.
@@ -275,6 +276,12 @@ the package is not published yet, or the download fails — the re-check is
 skipped with a warning instead of failing the job, so a missing setting costs a
 delayed check rather than a red run.
 
+A re-check that passes records the exact dependency set it proved still works in
+`packages/<name>/smoke-verified.txt` (the smoke job uploads it, and `publish`
+commits it). `plan` skips a package whose drift matches that record, so a
+library update costs one check instead of one per run until the package is
+rebuilt; the record is deleted when a new build's baseline replaces it.
+
 ### Rebuilding source packages when a check fails
 
 Packages with a `build()` function are compiled against whatever Arch packages
@@ -419,7 +426,7 @@ Packages themselves are not signed by `makepkg`; sign them too (or use
 | Smoke test fails with `renderer page appeared` / `no renderer page` | The wrapper launched but the UI never rendered. Compare `chrome.log` with the previous release; this usually means a missing runtime dependency or a broken asar/wrapper patch. |
 | Smoke test fails on `failed to install` | A runtime dependency is missing from `depends=`, or the package name changed upstream. The pacman error is in `pacman-install.log`. |
 | Source package rebuilt for no obvious reason | Its check failed against the current Arch packages and passed after a rebuild — usually a library or toolchain update. `REBUILD=fixed` in `smoke-logs/<package>/retry/summary.txt` confirms it; the rebuilt package (higher `pkgrel`) is what got published. |
-| Source package shows `runtime dependencies changed` and passes | The published build still works on the new libraries. Nothing is rebuilt, and the next publish refreshes `packages/<name>/build-env.txt`. |
+| Source package shows `runtime dependencies changed` and passes | The published build still works on the new libraries. Nothing is rebuilt, the dependency set is recorded in `packages/<name>/smoke-verified.txt` so it is not re-checked again, and the next publish refreshes `packages/<name>/build-env.txt`. |
 | Smoke job skipped with `could not fetch the published build` | The smoke job could not read the repository. Set `S3_PUBLIC_BASE_URL`, or keep `S3_BUCKET` plus the `AWS_*` secrets set (the workflow passes the publisher's settings). The reason is logged as a warning just above the skip. |
 | `no build baseline recorded yet` | The package has not been published since `build-env.txt` tracking was added. The next successful publish writes it. |
 | `REBUILD=failed` in a summary | The rebuild itself broke (upstream source gone, checksum change). The attached logs are from the failing original build. |

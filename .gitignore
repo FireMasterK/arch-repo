@@ -2,7 +2,9 @@ out/
 _artifacts/
 _repo/
 _retry/
+_verified/
 smoke-logs/
+.smoke-verified/
 .srcdest/
 .ccache/
 .s3-objects.json

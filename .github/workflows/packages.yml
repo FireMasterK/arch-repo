@@ -387,6 +387,15 @@ jobs:
           path: smoke-logs/
           if-no-files-found: warn
 
+      # A re-check that passed leaves a record of the dependency set it proved
+      # still works, so the plan job stops re-checking it until something moves.
+      # The publish job is the only writer that commits, so it collects these.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: verified-${{ matrix.package }}
+          path: .smoke-verified/${{ matrix.package }}.txt
+          if-no-files-found: ignore
+
       - name: Open an issue with the failure logs
         if: steps.smoke.outcome == 'failure'
         env:
@@ -445,6 +454,14 @@ jobs:
         with:
           path: _retry
           pattern: retry-*
+          merge-multiple: true
+
+      # Dependency sets a passing re-check proved still work.
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          path: _verified
+          pattern: verified-*
           merge-multiple: true
 
       - name: Publish packages

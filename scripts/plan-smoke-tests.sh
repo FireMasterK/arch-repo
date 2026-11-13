@@ -33,19 +33,36 @@ if ((${#candidates[@]})); then
   if bash "$here/dep-drift.sh" --dump >"$dump" &&
     batch=$(python3 "$here/dep-drift.py" --batch "$root" "$dump" "${candidates[@]}"); then
     declare -A codes=()
+    declare -A drifts=()
+    current=''
     while IFS= read -r line; do
       case $line in
       '@@ '*)
         read -r _ pkg code <<<"$line"
         codes[$pkg]=$code
+        current=$pkg
         ;;
-      *) log "    $line" ;;
+      *)
+        log "    $line"
+        # Keep the exact drift set per package so it can be compared with what
+        # a previous re-check already proved still works.
+        if [[ -n $current ]]; then
+          drifts[$current]+=${drifts[$current]:+$'\n'}$line
+        fi
+        ;;
       esac
     done <<<"$batch"
 
     for pkg in "${candidates[@]}"; do
       case ${codes[$pkg]-} in
       0)
+        verified=$root/packages/$pkg/smoke-verified.txt
+        if [[ -f $verified && $(<"$verified") == "${drifts[$pkg]-}" ]]; then
+          # Re-checking on every run would only repeat what already passed; the
+          # record is dropped when the package is rebuilt or the drift changes.
+          log "$pkg: this dependency set already passed a re-check, skipping"
+          continue
+        fi
         log "$pkg: runtime dependencies changed, scheduling a re-check"
         tests+=("$pkg")
         ;;

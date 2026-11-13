@@ -78,4 +78,28 @@ if ((rc != 0)); then
 fi
 
 log "$pkg: re-checking the published build $newest"
-PKG_DIR=$stage bash "$here/smoke-with-retry.sh" "$pkg"
+
+# The retry runner reports `rebuilt` through GITHUB_OUTPUT. Read it through a
+# private file so this script can tell a plain pass from a pass that needed a
+# rebuild, then forward the outputs unchanged to the workflow.
+outputs=$(mktemp "${TMPDIR:-/tmp}/smoke-outputs-$pkg.XXXXXX")
+rc=0
+GITHUB_OUTPUT=$outputs PKG_DIR=$stage bash "$here/smoke-with-retry.sh" "$pkg" || rc=$?
+rebuilt=$(sed -n 's/^rebuilt=//p' "$outputs" | tail -n 1)
+if [[ -n ${GITHUB_OUTPUT:-} && -s $outputs ]]; then
+  cat "$outputs" >>"$GITHUB_OUTPUT"
+fi
+rm -f "$outputs"
+
+# The published build still works against this dependency set, and the next
+# plan run can skip re-checking it until something moves again. The record only
+# covers the build that was just checked, so a retry rebuild (which publishes a
+# fresh baseline) does not write one.
+if ((rc == 0)) && [[ $rebuilt != true ]]; then
+  verified=$root/.smoke-verified
+  mkdir -p "$verified"
+  printf '%s\n' "$drift" >"$verified/$pkg.txt"
+  log "$pkg: recorded the verified dependency set in .smoke-verified/$pkg.txt"
+fi
+
+exit "$rc"
