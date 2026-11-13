@@ -195,12 +195,19 @@ repos (for example a sibling package from this repo) are skipped, because
 installed. Updaters that query the GitHub API can read `$GITHUB_TOKEN`, which
 the workflow provides to avoid the anonymous rate limit.
 
-Packages without an `update.sh` are built only on `push` to `main` or when
-forced, so they can be maintained by hand. A push to `main` also rebuilds the
-packages it touched with a `pkgrel` bump; that is how hand-edited PKGBUILDs get
-published. A push that changes `scripts/**` instead forces every package,
-because the build scripts shape how all of them are produced.
-`scripts/changed-packages.sh` works out which of the two a push is.
+Packages without an `update.sh` are built only when forced (by a push that
+touched them, below, or by a manual `force`), so they can be maintained by
+hand. A push to `main` also rebuilds the source packages it touched with a
+`pkgrel` bump; that is how hand-edited PKGBUILDs get published. Binary repacks (a PKGBUILD with no `build()`, such as
+`cursor`, `grok-bot` and `codspeed`) are skipped: rebuilding one only re-packs
+the same upstream artifact, so its new versions come from its updater alone. To
+ship a hand-edited binary repack, run the workflow manually with `force` (and
+`packages` set to it, if you like).
+
+A push that changes `scripts/build-package.sh` forces every package, because
+that script decides how all of them are compiled. Other scripts under
+`scripts/` do not change what a package contains, so a push touching only them
+forces nothing. `scripts/changed-packages.sh` works out which case a push is.
 
 To push something under `packages/**` or `scripts/**` that should not rebuild,
 put `[skip build]` in the head commit's message:

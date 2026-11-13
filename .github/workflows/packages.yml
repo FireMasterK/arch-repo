@@ -101,10 +101,11 @@ jobs:
           fetch-depth: 0
 
       # A push carries hand-edited PKGBUILDs, and a hand-edited file has no
-      # version change to detect, so what the push touched is force-rebuilt
-      # with a pkgrel bump. Limiting that to the touched packages keeps an
-      # unrelated commit from rebuilding and republishing the whole repository.
-      # A commit message containing `[skip build]` opts the push out entirely.
+      # version change to detect, so the source packages the push touched are
+      # force-rebuilt with a pkgrel bump. Binary repacks are left alone:
+      # rebuilding one only re-packs the artifact its updater already published.
+      # A change to scripts/build-package.sh forces every package instead, and a
+      # commit message containing `[skip build]` opts the push out entirely.
       - name: Determine what the push touched
         id: changed
         if: github.event_name == 'push'
@@ -193,12 +194,12 @@ jobs:
           # Only a push, or an explicit `force`, rebuilds a version upstream did
           # not change: a push because a hand-edited PKGBUILD has no detectable
           # content change, `force` because that is what it was asked to do. A
-          # push that touched no package (and no build script) forces nothing,
-          # so it only runs the upstream checks below.
+          # push that touched no source package (and not the build driver)
+          # forces nothing, so it only runs the upstream checks below.
           FORCE: ${{ (inputs.force || steps.changed.outputs.tooling == 'true' || steps.changed.outputs.packages != '') && 'true' || 'false' }}
           # Restricts that force to the packages the push touched. Empty means
           # every package, which is what a manual `force` run wants and what a
-          # push that changed the build scripts affects.
+          # push that changed scripts/build-package.sh affects.
           FORCE_PACKAGES: ${{ steps.changed.outputs.packages }}
           # Updaters that query the GitHub API use this for a higher rate limit.
           GITHUB_TOKEN: ${{ github.token }}

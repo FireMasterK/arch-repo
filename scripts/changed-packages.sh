@@ -8,10 +8,18 @@
 # the commit actually touched keeps "add one package" from rebuilding and
 # republishing every other package.
 #
+# Only source packages (those with a build() function) are rebuilt from a push.
+# A compiled package's output depends on the Arch libraries present on build
+# day, so republishing it picks up a fix. A binary repack does not: rebuilding
+# it re-packs the same upstream artifact, which is just a large download and a
+# duplicate package, so its new versions come from its updater alone. A hand
+# edit to such a PKGBUILD can still be shipped by dispatching the workflow with
+# `force`.
+#
 # Outputs (to $GITHUB_OUTPUT when running in Actions):
-#   packages - space separated names of the packages the push touched
-#   tooling  - "true" when the push changed the build scripts, which shape every
-#              package's output, so all of them are forced
+#   packages - space separated names of the source packages the push touched
+#   tooling  - "true" when the push changed scripts/build-package.sh, which
+#              shapes every package's output, so all of them are forced
 #   skip     - "true" when the pushed commit carried SKIP_MARKER, which empties
 #              both outputs above
 #
@@ -73,10 +81,12 @@ elif [[ -z $before || $before =~ ^0+$ ]]; then
 elif ! files=$(git -C "$root" diff --name-only --diff-filter=ACMR "$before" "$after"); then
   log "could not diff $before..$after; forcing every package"
   tooling=true
-elif grep -q '^scripts/' <<<"$files"; then
-  # The build scripts decide how every package is produced, so a change there
-  # affects all of them the way a PKGBUILD edit affects its own package.
-  log 'push changed the build scripts; forcing every package'
+elif grep -qxF -- 'scripts/build-package.sh' <<<"$files"; then
+  # build-package.sh decides how every package is compiled, so a change there
+  # affects all of them the way a PKGBUILD edit affects its own package. The
+  # other scripts (publishing, smoke tests) do not change what a package
+  # contains, so they force nothing.
+  log 'push changed the build driver (scripts/build-package.sh); forcing every package'
   tooling=true
 else
   # Deleted package directories are left out: there is nothing to build, and
@@ -84,6 +94,10 @@ else
   while IFS= read -r pkg; do
     [[ -n $pkg ]] || continue
     [[ -f $root/packages/$pkg/PKGBUILD ]] || continue
+    if ! builds_from_source "$root" "$pkg"; then
+      log "$pkg: binary repack, so a push does not rebuild it"
+      continue
+    fi
     packages+=("$pkg")
   done < <(sed -n 's#^packages/\([^/]*\)/.*#\1#p' <<<"$files" | sort -u)
 fi
@@ -107,5 +121,5 @@ elif [[ $tooling == true ]]; then
 elif ((${#packages[@]})); then
   log "to force-rebuild: ${packages[*]}"
 else
-  log 'push touched no package and no build script; nothing to force-rebuild'
+  log 'push forced no source package; nothing to force-rebuild'
 fi
