@@ -85,6 +85,17 @@ build() {
     -DLIGHTNING_ENABLE_WEBRTC=ON \
     -DLIGHTNING_REQUIRE_WEBRTC=ON \
     -DLIGHTNING_REQUIRE_QT_SVG=ON
+
+  # The Rust backend pulls in C libraries it compiles itself (aws-lc for rustls,
+  # SQLite for matrix-sdk). rustc copies their objects into
+  # libmatrix_client_rust.a but leaves them out of the archive's symbol index,
+  # and ld only reads the index, so the C++ link fails with undefined
+  # aws_lc_0_*_*/sqlite3_* references. Build the Rust library on its own and
+  # re-index it before the rest of the tree is linked.
+  rustlib=build/rust/release/libmatrix_client_rust.a
+  cmake --build build --target matrix-client-rust-build
+  ranlib "$rustlib"
+
   cmake --build build
 }
 
