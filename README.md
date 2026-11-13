@@ -202,6 +202,18 @@ published. A push that changes `scripts/**` instead forces every package,
 because the build scripts shape how all of them are produced.
 `scripts/changed-packages.sh` works out which of the two a push is.
 
+To push something under `packages/**` or `scripts/**` that should not rebuild,
+put `[skip build]` in the head commit's message:
+
+```bash
+git commit -m "chore(docs): explain the smoke config [skip build]"
+```
+
+No package is force-rebuilt then; the run only does what a scheduled run does,
+so an upstream version change in the same window still builds. This suits
+metadata refreshes and comment or README edits. A different marker can be set
+with `SKIP_MARKER` when running the script by hand.
+
 ## Startup checks
 
 Every package is started once in a disposable `archlinux:latest` container

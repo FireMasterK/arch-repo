@@ -104,6 +104,7 @@ jobs:
       # version change to detect, so what the push touched is force-rebuilt
       # with a pkgrel bump. Limiting that to the touched packages keeps an
       # unrelated commit from rebuilding and republishing the whole repository.
+      # A commit message containing `[skip build]` opts the push out entirely.
       - name: Determine what the push touched
         id: changed
         if: github.event_name == 'push'
@@ -111,6 +112,12 @@ jobs:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.event.after }}
         run: ./scripts/changed-packages.sh
+
+      - name: Note that the push asked to skip rebuilding
+        if: steps.changed.outputs.skip == 'true'
+        run: |
+          echo "::notice title=Rebuild skipped::the pushed commit carries [skip build], \
+          so no package is force-rebuilt. Upstream version changes still build."
 
       # Some upstreams (x.ai/bot) only serve the page to a browser TLS
       # fingerprint, so the updaters use curl-impersonate when it is on PATH.
