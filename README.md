@@ -195,8 +195,11 @@ installed. Updaters that query the GitHub API can read `$GITHUB_TOKEN`, which
 the workflow provides to avoid the anonymous rate limit.
 
 Packages without an `update.sh` are built only on `push` to `main` or when
-forced, so they can be maintained by hand. A push to `main` also rebuilds every
-package with a `pkgrel` bump; that is how hand-edited PKGBUILDs get published.
+forced, so they can be maintained by hand. A push to `main` also rebuilds the
+packages it touched with a `pkgrel` bump; that is how hand-edited PKGBUILDs get
+published. A push that changes `scripts/**` instead forces every package,
+because the build scripts shape how all of them are produced.
+`scripts/changed-packages.sh` works out which of the two a push is.
 
 ## Startup checks
 

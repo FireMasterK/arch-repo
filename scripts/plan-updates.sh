@@ -7,6 +7,14 @@
 #   test_candidates - JSON array of published source packages whose dependency
 #                     drift should be checked (see scripts/plan-smoke-tests.sh)
 #   failed          - comma separated list of packages whose updater failed
+#
+# Environment:
+#   PACKAGES        - space separated package names to consider (default: all)
+#   FORCE           - "true" to also rebuild a package whose upstream version
+#                     did not change, with a pkgrel bump
+#   FORCE_PACKAGES  - space separated names FORCE applies to (default: every
+#                     package considered), so a push can force only what it
+#                     touched instead of the whole repository
 set -euo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -16,7 +24,7 @@ source "$here/lib.sh"
 
 force=${FORCE:-false}
 read -r -a filter <<<"${PACKAGES:-}"
-event=${GITHUB_EVENT_NAME:-local}
+read -r -a force_filter <<<"${FORCE_PACKAGES:-}"
 
 contains() {
   local needle=$1 candidate
@@ -25,6 +33,13 @@ contains() {
     [[ $candidate == "$needle" ]] && return 0
   done
   return 1
+}
+
+# True when this package should be rebuilt even though its version is unchanged.
+force_pkg() {
+  [[ $force == true ]] || return 1
+  ((${#force_filter[@]})) || return 0
+  contains "$1" "${force_filter[@]}"
 }
 
 changed=()
@@ -39,12 +54,12 @@ while IFS= read -r dir; do
     continue
   fi
 
-  # Packages without an updater are only built when something was pushed
-  # (or forced), so they can be maintained by hand.
+  # Packages without an updater are only built when forced (a push that touched
+  # them, or an explicit `force`), so they can be maintained by hand.
   if [[ ! -f $dir/update.sh ]]; then
     versions[$pkg]=$(pkgvar "$dir/PKGBUILD" pkgver)
-    if [[ $event == push || $force == true ]]; then
-      log "$pkg: no updater, scheduling rebuild (event: $event, force: $force)"
+    if force_pkg "$pkg"; then
+      log "$pkg: no updater, scheduling rebuild"
       changed+=("$pkg")
     fi
     continue
@@ -63,7 +78,7 @@ while IFS= read -r dir; do
 
   if [[ $after != "$before" ]]; then
     changed+=("$pkg")
-  elif [[ $force == true ]]; then
+  elif force_pkg "$pkg"; then
     bump_pkgrel "$dir/PKGBUILD"
     changed+=("$pkg")
   fi

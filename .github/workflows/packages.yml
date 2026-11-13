@@ -95,6 +95,22 @@ jobs:
       failed: ${{ steps.plan.outputs.failed }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # A push is compared against the commit it landed on, so the plan job
+          # needs the parent history and not just the tip.
+          fetch-depth: 0
+
+      # A push carries hand-edited PKGBUILDs, and a hand-edited file has no
+      # version change to detect, so what the push touched is force-rebuilt
+      # with a pkgrel bump. Limiting that to the touched packages keeps an
+      # unrelated commit from rebuilding and republishing the whole repository.
+      - name: Determine what the push touched
+        id: changed
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: ./scripts/changed-packages.sh
 
       # Some upstreams (x.ai/bot) only serve the page to a browser TLS
       # fingerprint, so the updaters use curl-impersonate when it is on PATH.
@@ -167,9 +183,16 @@ jobs:
         id: plan
         env:
           PACKAGES: ${{ inputs.packages }}
-          # A push might contain hand-edited PKGBUILDs, so rebuild everything
-          # it touches with a pkgrel bump (no way to know if content changed).
-          FORCE: ${{ (inputs.force || github.event_name == 'push') && 'true' || 'false' }}
+          # Only a push, or an explicit `force`, rebuilds a version upstream did
+          # not change: a push because a hand-edited PKGBUILD has no detectable
+          # content change, `force` because that is what it was asked to do. A
+          # push that touched no package (and no build script) forces nothing,
+          # so it only runs the upstream checks below.
+          FORCE: ${{ (inputs.force || steps.changed.outputs.tooling == 'true' || steps.changed.outputs.packages != '') && 'true' || 'false' }}
+          # Restricts that force to the packages the push touched. Empty means
+          # every package, which is what a manual `force` run wants and what a
+          # push that changed the build scripts affects.
+          FORCE_PACKAGES: ${{ steps.changed.outputs.packages }}
           # Updaters that query the GitHub API use this for a higher rate limit.
           GITHUB_TOKEN: ${{ github.token }}
         run: ./scripts/plan-updates.sh
@@ -246,6 +269,9 @@ jobs:
       - name: Build package
         env:
           PACKAGES: ${{ matrix.package }}
+          # The matrix already holds only what this run decided to build, so
+          # this only decides whether an unchanged version gets a pkgrel bump:
+          # a package scheduled for a real version change is unaffected.
           FORCE: ${{ (inputs.force || github.event_name == 'push') && 'true' || 'false' }}
         run: bash "$GITHUB_WORKSPACE/scripts/container-build.sh"
 
