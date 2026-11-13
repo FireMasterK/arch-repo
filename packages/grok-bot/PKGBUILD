@@ -2,8 +2,8 @@
 # Based on the AUR grok-bot-bin package.
 
 pkgname=grok-bot
-pkgver=1.0.1
-pkgrel=2
+pkgver=1.0.3
+pkgrel=1
 pkgdesc='Grok Bot desktop agent'
 arch=('x86_64')
 url='https://cursor.com'
@@ -33,7 +33,7 @@ replaces=('grok-bot-bin')
 options=('!strip' '!debug')
 
 # Updated by update.sh from the x.ai/bot download links.
-_commit=7eb488cd12ea2e65065a6b227f3ab49160b618bd
+_commit=be8eaf76ba888db05a6a8950922f5fc8bb4d14e9
 _deb="grok-bot_${pkgver}_amd64.deb"
 
 source=(
@@ -42,7 +42,7 @@ source=(
   linux-tray.cjs
   extract-asar.py
 )
-sha256sums=('86086a84a995836b8cbf09dcab33abe0b0fde782cd9fa5b98a427ede711cc337'
+sha256sums=('ef90d8171fe207f39b887753c1ff492c6684a1a9f910d6e1dfa0303889fcf8f0'
             '9b3cccfada1dbe44ce794177181515aaf328603484327ef72a914234544bfbf8'
             '9ea1f1939677ec7364bc024ec4b87f8873ef41e6b1b5cec407d0a022ca3678f6'
             '86e6a9d2ce60f974c002a0187fdca7f111744ff4a1187dc70ba415fe6c715942')
