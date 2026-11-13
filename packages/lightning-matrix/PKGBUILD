@@ -3,7 +3,7 @@
 
 pkgname=lightning-matrix
 pkgver=0.10.5
-pkgrel=1
+pkgrel=2
 pkgdesc='Native Qt 6 Matrix desktop client using the official Rust Matrix SDK'
 arch=('x86_64')
 url='https://www.lightning-matrix.org/'
