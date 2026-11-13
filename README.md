@@ -266,6 +266,15 @@ libarchive 3.7.7-1 3.8.11-1
 Only source packages are tracked this way: a binary repack cannot be rebuilt, so
 re-checking it would only cost time.
 
+The re-check runs against the *published* package, which that run did not build,
+so the smoke job reads the repository itself (`scripts/fetch-published.sh`):
+`S3_PUBLIC_BASE_URL` when it is set, otherwise signed requests using the same
+`S3_BUCKET`, `S3_ENDPOINT`, `S3_PREFIX` and `AWS_*` credentials the publisher
+uses. When none of that works — no public URL and no credentials, no `aws` CLI,
+the package is not published yet, or the download fails — the re-check is
+skipped with a warning instead of failing the job, so a missing setting costs a
+delayed check rather than a red run.
+
 ### Rebuilding source packages when a check fails
 
 Packages with a `build()` function are compiled against whatever Arch packages
@@ -311,6 +320,7 @@ Run the same checks locally against `out/` (or any directory with
 ./scripts/local-smoke.sh cursor          # one package
 LOG_DIR=/tmp/logs ./scripts/local-smoke.sh grok-bot
 ./scripts/dep-drift.sh valgrind-codspeed # did its runtime dependencies move?
+./scripts/fetch-published.sh valgrind-codspeed /tmp/pub   # download the published build
 REPORT_DRY_RUN=1 ./scripts/report-smoke-failure.sh grok-bot   # print the issue body
 ```
 
@@ -410,6 +420,7 @@ Packages themselves are not signed by `makepkg`; sign them too (or use
 | Smoke test fails on `failed to install` | A runtime dependency is missing from `depends=`, or the package name changed upstream. The pacman error is in `pacman-install.log`. |
 | Source package rebuilt for no obvious reason | Its check failed against the current Arch packages and passed after a rebuild — usually a library or toolchain update. `REBUILD=fixed` in `smoke-logs/<package>/retry/summary.txt` confirms it; the rebuilt package (higher `pkgrel`) is what got published. |
 | Source package shows `runtime dependencies changed` and passes | The published build still works on the new libraries. Nothing is rebuilt, and the next publish refreshes `packages/<name>/build-env.txt`. |
+| Smoke job skipped with `could not fetch the published build` | The smoke job could not read the repository. Set `S3_PUBLIC_BASE_URL`, or keep `S3_BUCKET` plus the `AWS_*` secrets set (the workflow passes the publisher's settings). The reason is logged as a warning just above the skip. |
 | `no build baseline recorded yet` | The package has not been published since `build-env.txt` tracking was added. The next successful publish writes it. |
 | `REBUILD=failed` in a summary | The rebuild itself broke (upstream source gone, checksum change). The attached logs are from the failing original build. |
 | `REBUILD=ineffective` in `retry/summary.txt` | The package was rebuilt against current Arch packages and still fails. The issue logs are from the retest, so they reflect the newest build. |

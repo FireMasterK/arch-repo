@@ -15,6 +15,9 @@
 #   PKG_DIR              built packages (default: out)
 #   LOG_DIR              smoke log root (default: smoke-logs)
 #   S3_PUBLIC_BASE_URL   published repository, used to fetch the built package
+#   S3_BUCKET, S3_ENDPOINT, S3_REGION, S3_PREFIX, S3_ADDRESSING_STYLE
+#                        signed access to that repository when it is private
+#                        (see scripts/fetch-published.sh for the full list)
 #   REPO_DB              pacman db name (default: arch-repo)
 #   SMOKE_IMAGE          image used to read the current package versions
 set -uo pipefail
@@ -62,22 +65,17 @@ case $rc in
   ;;
 esac
 
-repo_url=${S3_PUBLIC_BASE_URL:-}
-[[ -n $repo_url ]] || die 'S3_PUBLIC_BASE_URL is required to re-check a published build'
-
-newest=$(published_filename "$repo_url" "${REPO_DB:-arch-repo}" "$pkg" || true)
-if [[ -z $newest ]]; then
-  log "$pkg: no published package found, skipping"
-  exit 2
-fi
-
 stage=$(mktemp -d "${TMPDIR:-/tmp}/published-$pkg.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
 
-log "$pkg: re-checking the published build $newest"
-if ! curl -fsSL --retry 2 --max-time 300 "${repo_url%/}/$newest" -o "$stage/$newest"; then
-  log "warning: $pkg: could not download $newest, skipping this run"
+# A repository this run cannot read (no public URL, no credentials) must not
+# fail the job: the re-check is an extra safety net, not a required step.
+rc=0
+newest=$(bash "$here/fetch-published.sh" "$pkg" "$stage") || rc=$?
+if ((rc != 0)); then
+  log "warning: $pkg: could not fetch the published build, skipping this run"
   exit 2
 fi
 
+log "$pkg: re-checking the published build $newest"
 PKG_DIR=$stage bash "$here/smoke-with-retry.sh" "$pkg"

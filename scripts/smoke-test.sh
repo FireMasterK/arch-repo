@@ -13,8 +13,9 @@
 #   SMOKE_IMAGE  container image (default: archlinux:latest)
 #   LOG_DIR      where logs are written (default: smoke-logs)
 #   LOG_SUBDIR   directory under LOG_DIR (default: the package name)
-#   S3_PUBLIC_BASE_URL - public repo URL, used to fetch siblings not built here
-#   REPO_DB      pacman db name (default: arch-repo)
+#   S3_PUBLIC_BASE_URL, S3_BUCKET, S3_ENDPOINT - how to read the published
+#                        repository for siblings that were not built here
+#                        (see scripts/fetch-published.sh)
 #
 # The container uses a headless Weston compositor (Wayland virtual buffer), so
 # GUI packages can be verified on a machine/CI runner without a display.
@@ -33,8 +34,6 @@ pkg_dir=$(cd -- "${PKG_DIR:-$root/out}" && pwd)
 # LOG_SUBDIR defaults to the package name; the retry runner nests a second
 # attempt under "<package>/retry" so the first attempt's logs are preserved.
 log_dir=${LOG_DIR:-$root/smoke-logs}/${LOG_SUBDIR:-$pkg}
-repo_url=${S3_PUBLIC_BASE_URL:-}
-db_name=${REPO_DB:-arch-repo}
 
 [[ -d $root/packages/$pkg ]] || die "unknown package: $pkg"
 
@@ -71,14 +70,13 @@ for dep in $(sibling_deps); do
   if cp -f "$pkg_dir/$dep"-[0-9]*.pkg.tar.zst "$stage"/ 2>/dev/null; then
     continue
   fi
-  newest=$(published_filename "$repo_url" "$db_name" "$dep" || true)
-  if [[ -z $newest ]]; then
+  rc=0
+  newest=$(bash "$here/fetch-published.sh" "$dep" "$stage") || rc=$?
+  if ((rc != 0)); then
     log "warning: '$dep' was not built in this run and is not in the published repo"
     continue
   fi
   log "$pkg: staging sibling '$newest' from the published repo"
-  curl -fsSL --retry 2 --max-time 300 "${repo_url%/}/$newest" -o "$stage/$newest" ||
-    log "warning: could not download '$newest'"
 done
 
 log "smoke testing $pkg $(basename "${packages[0]}")"
