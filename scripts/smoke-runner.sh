@@ -18,6 +18,9 @@ SMOKE_WINDOW_PATTERN=''
 SMOKE_PROCESS_PATTERN=''
 SMOKE_EXPECT_OUTPUT=''
 SMOKE_CMD=()
+# Extra arguments for Weston. The headless backend only advertises a wl_seat
+# with --fake-seat, which clients that preflight the seat (GitComet) require.
+SMOKE_WESTON_ARGS=()
 
 summary=$SMOKE_LOG_DIR/summary.txt
 result=FAIL
@@ -148,6 +151,7 @@ start_weston() {
 
   weston --debug --backend=headless-backend.so --socket=wl-smoke \
     --width=1280 --height=800 --idle-time=0 \
+    "${SMOKE_WESTON_ARGS[@]}" \
     --log="$SMOKE_LOG_DIR/weston.log" \
     >"$SMOKE_LOG_DIR/weston.out" 2>&1 &
   weston_pid=$!

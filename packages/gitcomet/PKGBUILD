@@ -1,0 +1,58 @@
+# Maintainer: Kavin <20838718+FireMasterK@users.noreply.github.com>
+# Based on the AUR gitcomet-bin package.
+
+pkgname=gitcomet
+pkgver=0.3.4
+pkgrel=1
+pkgdesc='Fast, resource-efficient Git GUI written in Rust'
+arch=('x86_64')
+url='https://gitcomet.dev/'
+license=('AGPL-3.0-only')
+# Direct NEEDED libraries from the release binary, plus git and the icon theme.
+depends=(
+  git
+  glibc
+  libgcc
+  fontconfig
+  libxcb
+  libxkbcommon
+  libxkbcommon-x11
+  zlib
+  hicolor-icon-theme
+  # Arch has no either/or dependencies. EGL guarantees a renderer is available;
+  # the preferred Vulkan renderer remains optional, as do native Wayland sessions.
+  libglvnd
+)
+optdepends=(
+  'vulkan-icd-loader: preferred Vulkan renderer (otherwise uses EGL)'
+  'wayland: native Wayland sessions (otherwise uses X11)'
+  'git-lfs: Git LFS support'
+  'gnupg: commit signing and verification'
+  'openssh: SSH remotes and commit signing'
+  'xdg-utils: open files and links in external applications'
+  'xdg-desktop-portal: file pickers and desktop settings'
+  'noto-fonts-cjk: CJK font coverage'
+  'noto-fonts-emoji: emoji font coverage'
+)
+provides=('gitcomet-bin')
+conflicts=('gitcomet-bin')
+# The upstream binary is not stripped; stripping it breaks the GPUI app.
+options=('!strip' '!debug')
+
+# Updated by update.sh from GitHub releases. The deb bundles the binary, the
+# desktop entry and the hicolor icons, so it is smaller than the tarball plus
+# the source archive the AUR package downloads for those assets.
+_deb="gitcomet_${pkgver}-1_amd64.deb"
+source=("${_deb}::https://github.com/Auto-Explore/GitComet/releases/download/v${pkgver}/${_deb}")
+sha256sums=('4380ce7e967ba810c7a6c91b6e018ac6aaf2f40f413fe433147d2c38b4b6df67')
+noextract=("$_deb") # package() streams data.tar.zst out of the deb itself.
+
+package() {
+  bsdtar -xOf "$_deb" data.tar.zst | bsdtar -C "$pkgdir" -xf -
+
+  # The deb's copyright file is the AGPL text; Arch keeps licenses under
+  # /usr/share/licenses. The README stays in /usr/share/doc.
+  install -Dm644 "$pkgdir/usr/share/doc/gitcomet/copyright" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  rm -f "$pkgdir/usr/share/doc/gitcomet/copyright"
+}

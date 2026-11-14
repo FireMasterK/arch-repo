@@ -12,17 +12,24 @@ Current packages:
 | `cursor` | [Cursor](https://cursor.com) `.deb` | `cursor.com/api/download` |
 | `grok-bot` | [Grok Bot](https://x.ai/bot) `.deb` | hashed download link on `x.ai/bot` |
 | `termius` | [Termius](https://termius.com) `.deb` | Termius' apt repository `Packages` index |
+| `gitcomet` | [GitComet](https://gitcomet.dev/) `.deb` | GitHub `releases/latest` |
 | `codspeed` | [CodSpeed](https://github.com/CodSpeedHQ/codspeed) runner tarball | GitHub `releases/latest` |
 | `valgrind-codspeed` | [valgrind-codspeed](https://github.com/CodSpeedHQ/valgrind-codspeed) source | GitHub `releases/latest` + submodule pin |
 | `lightning-matrix` | [Lightning](https://github.com/Mizerd/lightning) source | GitHub `releases/latest` |
 
-`cursor`, `grok-bot` and `termius` are binary repacks (based on the AUR
-`cursor-bin` / `grok-bot-bin` / `termius-bin` packages); `codspeed` repacks
-upstream's prebuilt musl runner.
+`cursor`, `grok-bot`, `termius` and `gitcomet` are binary repacks (based on the
+AUR `cursor-bin` / `grok-bot-bin` / `termius-bin` / `gitcomet-bin` packages);
+`codspeed` repacks upstream's prebuilt musl runner.
 `cursor` provides/conflicts with `cursor-bin`, `grok-bot`
 provides/conflicts with `grok-bot-bin`, `termius` provides/conflicts with
-`termius-bin` and `termius-deb`, `codspeed` provides/conflicts with
-`codspeed-bin`.
+`termius-bin` and `termius-deb`, `gitcomet` provides/conflicts with
+`gitcomet-bin`, `codspeed` provides/conflicts with `codspeed-bin`.
+
+`gitcomet` repacks upstream's `.deb`, which bundles the binary, the desktop
+entry and the hicolor icons. The AUR package instead downloads the release
+tarball plus the source archive for those assets; the `.deb` is smaller and
+keeps them in one artifact. The binary is a native GPUI app, so its smoke test
+waits for the Wayland surface owned by app id `gitcomet`.
 
 `termius` downloads the `.deb` from Termius' apt pool: `update.sh` reads the
 version and the versioned pool path from
@@ -162,7 +169,7 @@ Then:
 
 ```bash
 sudo pacman -Sy arch-repo
-sudo pacman -S cursor grok-bot termius codspeed lightning-matrix
+sudo pacman -S cursor grok-bot termius gitcomet codspeed lightning-matrix
 ```
 
 Pacman appends `arch-repo.db`, `arch-repo.files` and package filenames to that
@@ -215,8 +222,8 @@ hand. A push to `main` also rebuilds the packages it touched, with a `pkgrel`
 bump; that is how hand-edited PKGBUILDs get published.
 
 Source packages (a PKGBUILD with a `build()`) are rebuilt on every such push.
-Binary repacks (`cursor`, `grok-bot`, `termius`, `codspeed`) are rebuilt only
-when the push changes what they download — `pkgver`, `pkgrel` or a
+Binary repacks (`cursor`, `grok-bot`, `termius`, `gitcomet`, `codspeed`) are
+rebuilt only when the push changes what they download — `pkgver`, `pkgrel` or a
 `_`-prefixed helper such as cursor's `_commit` — or when the package is new.
 An edit to their comments, dependencies or `smoke.conf` is skipped, because
 rebuilding only re-packs the same upstream artifact, and their new versions
@@ -454,6 +461,7 @@ Packages themselves are not signed by `makepkg`; sign them too (or use
 | `valgrind-codspeed: failed to read the Capstone submodule pin` | GitHub API rate limit, or the fork stopped vendoring Capstone. Set `GITHUB_TOKEN` locally, or point `_capstone` at the right commit by hand. |
 | `termius: termius-app is not in the apt Packages index` | Termius renamed the package in `deb.termius.com`, or the `squeeze` suite moved. Check the `Packages` index and update `update.sh` and the pool URL in the PKGBUILD. |
 | `termius` smoke test opens no window | The app refuses to start when `$SHELL` is unset, which is the case in the smoke container. Its `smoke.conf` sets `SHELL` for the test; do not remove it. |
+| `gitcomet: deb asset is missing from release v...` | Upstream changed the Debian packaging revision in the deb filename. Update the `-1` in `packages/gitcomet/update.sh` and the `_deb` line in its PKGBUILD. |
 | `valgrind: Fatal error at startup: a function redirection ... cannot be set up` | `ld.so` in the running container has no debuginfo. Set `DEBUGINFOD_URLS=https://debuginfod.archlinux.org`; this happens with distro `valgrind` too. |
 | `404` from pacman | The bucket, prefix or `Server` URL is wrong, or the first publish never ran. Check `S3_PREFIX` matches the `Server` path. |
 | pacman sees an old package list | The CDN is serving a cached db. Set `CLOUDFRONT_DISTRIBUTION_ID` so publishes invalidate it, or purge `/arch-repo.db` manually. |
