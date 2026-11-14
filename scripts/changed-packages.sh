@@ -8,13 +8,15 @@
 # the commit actually touched keeps "add one package" from rebuilding and
 # republishing every other package.
 #
-# Only source packages (those with a build() function) are rebuilt from a push.
-# A compiled package's output depends on the Arch libraries present on build
-# day, so republishing it picks up a fix. A binary repack does not: rebuilding
-# it re-packs the same upstream artifact, which is just a large download and a
-# duplicate package, so its new versions come from its updater alone. A hand
-# edit to such a PKGBUILD can still be shipped by dispatching the workflow with
-# `force`.
+# Source packages (those with a build() function) are always rebuilt from a
+# push: their output depends on the Arch libraries present on build day, so
+# republishing one picks up a fix.
+#
+# A binary repack is rebuilt only when the push changes what it downloads -
+# pkgver, pkgrel or a `_`-prefixed helper such as cursor's `_commit` - or when
+# the package is new. A comment or metadata edit is skipped, because rebuilding
+# it would re-pack the same upstream artifact: a large download and a duplicate
+# package. Its versions otherwise come from its updater alone.
 #
 # Outputs (to $GITHUB_OUTPUT when running in Actions):
 #   packages - space separated names of the source packages the push touched
@@ -56,6 +58,28 @@ packages=()
 tooling=false
 skip=false
 
+# pkg_identity <rev> <package>
+# Prints the PKGBUILD lines that decide which upstream artifact the package
+# pulls in: pkgver, pkgrel and the updater-maintained `_`-prefixed helpers
+# (cursor's `_commit`, termius' `_deb`, ...). Comparing them across two
+# revisions separates a "ship this version" push from a comment-only edit
+# without evaluating the PKGBUILD.
+pkg_identity() {
+  git -C "$root" show "$1:packages/$2/PKGBUILD" 2>/dev/null |
+    sed -n -E '/^(pkgver|pkgrel|_[A-Za-z0-9_]+)=/p' | sort || true
+}
+
+# binary_repack_changed <before> <after> <package>
+# True when the push added the binary repack or changed what it downloads. An
+# unknown `before` (a new package, or a history the checkout does not have)
+# counts as changed so the package is built rather than silently skipped.
+binary_repack_changed() {
+  local old new
+  old=$(pkg_identity "$1" "$3")
+  new=$(pkg_identity "$2" "$3")
+  [[ -z $old || $old != "$new" ]]
+}
+
 # The pushed head commit is the one whose intent this run is acting on, so only
 # its message is consulted. Checking the whole range instead would let a marker
 # anywhere in a multi-commit push silence commits that meant to rebuild.
@@ -95,7 +119,15 @@ else
     [[ -n $pkg ]] || continue
     [[ -f $root/packages/$pkg/PKGBUILD ]] || continue
     if ! builds_from_source "$root" "$pkg"; then
-      log "$pkg: binary repack, so a push does not rebuild it"
+      # A binary repack only needs a rebuild when the push changed what it
+      # downloads. Anything else (a comment, a dependency, a README) would
+      # re-pack the artifact its updater already published.
+      if binary_repack_changed "$before" "$after" "$pkg"; then
+        log "$pkg: binary repack whose version or source changed"
+        packages+=("$pkg")
+      else
+        log "$pkg: binary repack unchanged, so a push does not rebuild it"
+      fi
       continue
     fi
     packages+=("$pkg")

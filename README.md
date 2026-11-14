@@ -211,12 +211,17 @@ the workflow provides to avoid the anonymous rate limit.
 
 Packages without an `update.sh` are built only when forced (by a push that
 touched them, below, or by a manual `force`), so they can be maintained by
-hand. A push to `main` also rebuilds the source packages it touched with a
-`pkgrel` bump; that is how hand-edited PKGBUILDs get published. Binary repacks (a PKGBUILD with no `build()`, such as
-`cursor`, `grok-bot` and `codspeed`) are skipped: rebuilding one only re-packs
-the same upstream artifact, so its new versions come from its updater alone. To
-ship a hand-edited binary repack, run the workflow manually with `force` (and
-`packages` set to it, if you like).
+hand. A push to `main` also rebuilds the packages it touched, with a `pkgrel`
+bump; that is how hand-edited PKGBUILDs get published.
+
+Source packages (a PKGBUILD with a `build()`) are rebuilt on every such push.
+Binary repacks (`cursor`, `grok-bot`, `termius`, `codspeed`) are rebuilt only
+when the push changes what they download — `pkgver`, `pkgrel` or a
+`_`-prefixed helper such as cursor's `_commit` — or when the package is new.
+An edit to their comments, dependencies or `smoke.conf` is skipped, because
+rebuilding only re-packs the same upstream artifact, and their new versions
+come from their updater alone. To ship such an edit, run the workflow manually
+with `force` (and `packages` set to it, if you like).
 
 A push that changes `scripts/build-package.sh` forces every package, because
 that script decides how all of them are compiled. Other scripts under
