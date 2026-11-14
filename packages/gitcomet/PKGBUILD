@@ -3,7 +3,7 @@
 
 pkgname=gitcomet
 pkgver=0.3.4
-pkgrel=1
+pkgrel=2
 pkgdesc='Fast, resource-efficient Git GUI written in Rust'
 arch=('x86_64')
 url='https://gitcomet.dev/'

@@ -1,7 +1,7 @@
 pkgbase = gitcomet
 	pkgdesc = Fast, resource-efficient Git GUI written in Rust
 	pkgver = 0.3.4
-	pkgrel = 1
+	pkgrel = 2
 	url = https://gitcomet.dev/
 	arch = x86_64
 	license = AGPL-3.0-only
