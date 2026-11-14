@@ -1,7 +1,7 @@
 pkgbase = codspeed
 	pkgdesc = CodSpeed test runner
-	pkgver = 5.6.3
-	pkgrel = 3
+	pkgver = 5.7.0
+	pkgrel = 1
 	url = https://github.com/CodSpeedHQ/codspeed
 	arch = x86_64
 	license = MIT
@@ -14,7 +14,7 @@ pkgbase = codspeed
 	provides = codspeed-bin
 	conflicts = codspeed-bin
 	replaces = codspeed-bin
-	source = codspeed-runner-x86_64-unknown-linux-musl.tar.gz::https://github.com/CodSpeedHQ/codspeed/releases/download/v5.6.3/codspeed-runner-x86_64-unknown-linux-musl.tar.gz
-	sha256sums = f29532a5cbcb3462bc5d6bcf5570ddb8c8cbfffed579cb48c35d3910ed5f7f00
+	source = codspeed-runner-x86_64-unknown-linux-musl.tar.gz::https://github.com/CodSpeedHQ/codspeed/releases/download/v5.7.0/codspeed-runner-x86_64-unknown-linux-musl.tar.gz
+	sha256sums = 6cc4177e65cab1467c897991e8a9245dd825376f3f03cd1577c9df00dedf7d5f
 
 pkgname = codspeed

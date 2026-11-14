@@ -2,8 +2,8 @@
 # Based on the AUR valgrind-codspeed package.
 
 pkgname=valgrind-codspeed
-pkgver=3.26.0_0codspeed13
-pkgrel=2
+pkgver=3.26.0_0codspeed14
+pkgrel=1
 pkgdesc='Fork of Valgrind to be used in Codspeed (x86-64-v3, LTO, mold)'
 arch=('x86_64')
 url='https://github.com/CodSpeedHQ/valgrind-codspeed'
@@ -43,7 +43,7 @@ source=(
   "${_upstream}.tar.gz::https://github.com/CodSpeedHQ/valgrind-codspeed/archive/refs/tags/${pkgver//_/-}.tar.gz"
   "capstone-${_capstone}.tar.gz::https://github.com/capstone-engine/capstone/archive/${_capstone}.tar.gz"
 )
-sha256sums=('b40321e8baa689d86f23c3e1a7823edd9b8cc8c56b9da5517fdd57b17891ed9b'
+sha256sums=('9bb23b642b7a6c3a100559ccd24f34c5b94fd532341c499e96df788408ccf5c9'
             '1b0d7efa450e766c120a8dfcf9b539f1e120925fc1478fbe125d6d52bae0c506')
 
 prepare() {
