@@ -11,15 +11,26 @@ Current packages:
 | --- | --- | --- |
 | `cursor` | [Cursor](https://cursor.com) `.deb` | `cursor.com/api/download` |
 | `grok-bot` | [Grok Bot](https://x.ai/bot) `.deb` | hashed download link on `x.ai/bot` |
+| `termius` | [Termius](https://termius.com) `.deb` | Termius' apt repository `Packages` index |
 | `codspeed` | [CodSpeed](https://github.com/CodSpeedHQ/codspeed) runner tarball | GitHub `releases/latest` |
 | `valgrind-codspeed` | [valgrind-codspeed](https://github.com/CodSpeedHQ/valgrind-codspeed) source | GitHub `releases/latest` + submodule pin |
 | `lightning-matrix` | [Lightning](https://github.com/Mizerd/lightning) source | GitHub `releases/latest` |
 
-`cursor` and `grok-bot` are binary repacks (based on the AUR `cursor-bin` /
-`grok-bot-bin` packages); `codspeed` repacks upstream's prebuilt musl runner.
+`cursor`, `grok-bot` and `termius` are binary repacks (based on the AUR
+`cursor-bin` / `grok-bot-bin` / `termius-bin` packages); `codspeed` repacks
+upstream's prebuilt musl runner.
 `cursor` provides/conflicts with `cursor-bin`, `grok-bot`
-provides/conflicts with `grok-bot-bin`, `codspeed` provides/conflicts with
+provides/conflicts with `grok-bot-bin`, `termius` provides/conflicts with
+`termius-bin` and `termius-deb`, `codspeed` provides/conflicts with
 `codspeed-bin`.
+
+`termius` downloads the `.deb` from Termius' apt pool: `update.sh` reads the
+version and the versioned pool path from
+`deb.termius.com/dists/squeeze/main/binary-amd64/Packages.gz` (the download
+links next to `download.termius.com/linux/Termius.deb`, including its
+`latest-linux.yml`, do not say which version they serve). The bundled Electron
+is kept, as upstream ships it, and the `$SHELL`-less smoke environment is
+worked around in its `smoke.conf`.
 
 `valgrind-codspeed` (AUR `valgrind-codspeed`) is built from source and
 provides/conflicts with `valgrind`: CodSpeed's fork carries a Capstone-based
@@ -28,12 +39,15 @@ the Capstone commit that the fork's `third_party/capstone` submodule points at,
 because the release tarball does not contain the submodule. Do not install it
 alongside the distro `valgrind`.
 
-It is compiled with CachyOS' flag set — `-O3 -march=x86-64-v3`, `mold`, LTO,
-`-fno-plt`, `_FORTIFY_SOURCE=3`, `-fcf-protection`, `-z now`,
-`pack-relative-relocs` — so **it needs an x86-64-v3 CPU** (AVX2, BMI2, FMA).
-`-march=native` and `-march=znver*` are avoided on purpose: the package is
-built on GitHub's Azure runners (Skylake/EPYC), so `native` would silently
-target the wrong microarchitecture.
+`valgrind-codspeed` and `lightning-matrix` are compiled with CachyOS' flag set
+— `-O3 -march=x86-64-v3`, `mold`, LTO, `-fno-plt`, `_FORTIFY_SOURCE=3`,
+`-fcf-protection`, `-z now`, `pack-relative-relocs` — so **both need an
+x86-64-v3 CPU** (AVX2, BMI2, FMA). `-march=native` and `-march=znver*` are
+avoided on purpose: the packages are built on GitHub's Azure runners
+(Skylake/EPYC), so `native` would silently target the wrong
+microarchitecture. For `lightning-matrix`, LTO covers the C++/Qt tree and
+cargo's own fat LTO covers the Rust SDK, which gets the same CPU baseline
+through `RUSTFLAGS=-C target-cpu=x86-64-v3`.
 
 `lightning-matrix` (AUR `lightning-matrix-appimage`) is built from upstream's
 source release instead of repacking the AppImage: Qt 6/QML for the UI and the
@@ -148,7 +162,7 @@ Then:
 
 ```bash
 sudo pacman -Sy arch-repo
-sudo pacman -S cursor grok-bot codspeed lightning-matrix
+sudo pacman -S cursor grok-bot termius codspeed lightning-matrix
 ```
 
 Pacman appends `arch-repo.db`, `arch-repo.files` and package filenames to that
@@ -433,6 +447,8 @@ Packages themselves are not signed by `makepkg`; sign them too (or use
 | `cursor: could not read the bundled Electron version` | Cursor renamed the launcher binary or stopped embedding an `Electron/` version string in it. Update `deb_electron_version` in `packages/cursor/update.sh`, and set `_electron` by hand if the release is urgent. |
 | `valgrind-codspeed: unexpected latest release URL` | The fork changed its tag scheme (`<valgrind>-0codspeed<N>`). Update the regex in `packages/valgrind-codspeed/update.sh`. |
 | `valgrind-codspeed: failed to read the Capstone submodule pin` | GitHub API rate limit, or the fork stopped vendoring Capstone. Set `GITHUB_TOKEN` locally, or point `_capstone` at the right commit by hand. |
+| `termius: termius-app is not in the apt Packages index` | Termius renamed the package in `deb.termius.com`, or the `squeeze` suite moved. Check the `Packages` index and update `update.sh` and the pool URL in the PKGBUILD. |
+| `termius` smoke test opens no window | The app refuses to start when `$SHELL` is unset, which is the case in the smoke container. Its `smoke.conf` sets `SHELL` for the test; do not remove it. |
 | `valgrind: Fatal error at startup: a function redirection ... cannot be set up` | `ld.so` in the running container has no debuginfo. Set `DEBUGINFOD_URLS=https://debuginfod.archlinux.org`; this happens with distro `valgrind` too. |
 | `404` from pacman | The bucket, prefix or `Server` URL is wrong, or the first publish never ran. Check `S3_PREFIX` matches the `Server` path. |
 | pacman sees an old package list | The CDN is serving a cached db. Set `CLOUDFRONT_DISTRIBUTION_ID` so publishes invalidate it, or purge `/arch-repo.db` manually. |

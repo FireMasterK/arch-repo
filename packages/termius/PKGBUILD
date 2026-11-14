@@ -1,0 +1,71 @@
+# Maintainer: Kavin <20838718+FireMasterK@users.noreply.github.com>
+# Based on the AUR termius-bin and termius-deb packages.
+
+pkgname=termius
+pkgver=10.4.1
+pkgrel=1
+pkgdesc='Modern SSH client for Linux'
+arch=('x86_64')
+url='https://www.termius.com/'
+license=('LicenseRef-Termius' 'MIT' 'BSD-3-Clause')
+# Termius bundles its own Electron and helper libraries in /opt/Termius, so no
+# electronNN dependency is needed (cursor depends on Arch's Electron instead).
+depends=(
+  alsa-lib
+  at-spi2-core
+  dbus
+  e2fsprogs
+  expat
+  gtk3
+  hicolor-icon-theme
+  keyutils
+  libbsd
+  libnotify
+  libsecret
+  libxss
+  libxtst
+  nss
+  util-linux-libs
+  xdg-utils
+)
+optdepends=(
+  'libappindicator-gtk3: tray indicator support'
+  'org.freedesktop.secrets: credential storage service'
+)
+provides=('termius-bin' 'termius-deb')
+conflicts=('termius-bin' 'termius-deb')
+replaces=('termius-bin' 'termius-deb')
+# Prebuilt Electron app without debug symbols; stripping breaks it.
+options=('!strip' '!debug')
+
+# Updated by update.sh from Termius' apt repository. The pool file is versioned,
+# so a given pkgver always resolves to the same download.
+_deb="termius-${pkgver}.deb"
+source=("${_deb}::https://deb.termius.com/pool/main/t/termius-app/termius-app_${pkgver}_amd64.deb")
+sha256sums=('0bae28fa4e89b8824ea7901331457f313927f0ceaa16523c5732657db8f40df5')
+noextract=("$_deb") # package() streams data.tar.xz out of the deb itself.
+
+package() {
+  bsdtar -O -xf "$_deb" data.tar.xz | bsdtar -C "$pkgdir" -xJf -
+
+  # Drop Debian-only bits: a cron job that adds Termius' apt repository and its
+  # signing keys, and the Debian changelog. pacman is the package manager here.
+  rm -rf "$pkgdir/etc" "$pkgdir/usr/share/doc"
+
+  install -d "$pkgdir/usr/bin"
+  ln -s /opt/Termius/termius-app "$pkgdir/usr/bin/$pkgname"
+
+  # electron-builder ships this AppArmor profile, which allows the unprivileged
+  # user namespaces the Chromium sandbox needs. The deb's postinst installs
+  # upstream's termius.apparmor template instead, but that one has to be
+  # rendered against the client's AppArmor ABI, and pacman never runs maintainer
+  # scripts. The profile is inert unless AppArmor is enabled.
+  install -Dm644 "$pkgdir/opt/Termius/resources/apparmor-profile" \
+    "$pkgdir/etc/apparmor.d/termius-app"
+
+  install -d "$pkgdir/usr/share/licenses/$pkgname"
+  ln -s /opt/Termius/LICENSE.electron.txt \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE.electron.txt"
+  ln -s /opt/Termius/LICENSES.chromium.html \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSES.chromium.html"
+}
