@@ -1,0 +1,22 @@
+--- a/src/editor-application-actions.c
++++ b/src/editor-application-actions.c
+@@ -295,7 +295,7 @@
+         g_ptr_array_add (unsaved, g_object_ref (page));
+     }
+ 
+-  if (unsaved->len > 0)
++  if (FALSE && unsaved->len > 0)
+     {
+       _editor_save_changes_dialog_run_async (gtk_application_get_active_window (GTK_APPLICATION (self)),
+                                              unsaved,
+--- a/src/editor-window.c
++++ b/src/editor-window.c
+@@ -338,7 +338,7 @@
+         g_ptr_array_add (unsaved, g_object_ref (page));
+     }
+ 
+-  if (unsaved->len > 0)
++  if (FALSE && unsaved->len > 0)
+     {
+       _editor_save_changes_dialog_run_async (GTK_WINDOW (self),
+                                              unsaved,

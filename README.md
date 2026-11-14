@@ -5,64 +5,8 @@ Actions. It checks upstream every 30 minutes, rebuilds only the packages whose
 version changed, and publishes a pacman database plus packages to an
 S3-compatible bucket behind a CDN.
 
-Current packages:
-
-| Package | Upstream | Version source |
-| --- | --- | --- |
-| `cursor` | [Cursor](https://cursor.com) `.deb` | `cursor.com/api/download` |
-| `grok-bot` | [Grok Bot](https://x.ai/bot) `.deb` | hashed download link on `x.ai/bot` |
-| `termius` | [Termius](https://termius.com) `.deb` | Termius' apt repository `Packages` index |
-| `gitcomet` | [GitComet](https://gitcomet.dev/) `.deb` | GitHub `releases/latest` |
-| `codspeed` | [CodSpeed](https://github.com/CodSpeedHQ/codspeed) runner tarball | GitHub `releases/latest` |
-| `valgrind-codspeed` | [valgrind-codspeed](https://github.com/CodSpeedHQ/valgrind-codspeed) source | GitHub `releases/latest` + submodule pin |
-| `lightning-matrix` | [Lightning](https://github.com/Mizerd/lightning) source | GitHub `releases/latest` |
-
-`cursor`, `grok-bot`, `termius` and `gitcomet` are binary repacks (based on the
-AUR `cursor-bin` / `grok-bot-bin` / `termius-bin` / `gitcomet-bin` packages);
-`codspeed` repacks upstream's prebuilt musl runner.
-`cursor` provides/conflicts with `cursor-bin`, `grok-bot`
-provides/conflicts with `grok-bot-bin`, `termius` provides/conflicts with
-`termius-bin` and `termius-deb`, `gitcomet` provides/conflicts with
-`gitcomet-bin`, `codspeed` provides/conflicts with `codspeed-bin`.
-
-`gitcomet` repacks upstream's `.deb`, which bundles the binary, the desktop
-entry and the hicolor icons. The AUR package instead downloads the release
-tarball plus the source archive for those assets; the `.deb` is smaller and
-keeps them in one artifact. The binary is a native GPUI app, so its smoke test
-waits for the Wayland surface owned by app id `gitcomet`.
-
-`termius` downloads the `.deb` from Termius' apt pool: `update.sh` reads the
-version and the versioned pool path from
-`deb.termius.com/dists/squeeze/main/binary-amd64/Packages.gz` (the download
-links next to `download.termius.com/linux/Termius.deb`, including its
-`latest-linux.yml`, do not say which version they serve). The bundled Electron
-is kept, as upstream ships it, and the `$SHELL`-less smoke environment is
-worked around in its `smoke.conf`.
-
-`valgrind-codspeed` (AUR `valgrind-codspeed`) is built from source and
-provides/conflicts with `valgrind`: CodSpeed's fork carries a Capstone-based
-cycle-estimation decoder for Callgrind, and `codspeed` depends on it. It pins
-the Capstone commit that the fork's `third_party/capstone` submodule points at,
-because the release tarball does not contain the submodule. Do not install it
-alongside the distro `valgrind`.
-
-`valgrind-codspeed` and `lightning-matrix` are compiled with CachyOS' flag set
-— `-O3 -march=x86-64-v3`, `mold`, LTO, `-fno-plt`, `_FORTIFY_SOURCE=3`,
-`-fcf-protection`, `-z now`, `pack-relative-relocs` — so **both need an
-x86-64-v3 CPU** (AVX2, BMI2, FMA). `-march=native` and `-march=znver*` are
-avoided on purpose: the packages are built on GitHub's Azure runners
-(Skylake/EPYC), so `native` would silently target the wrong
-microarchitecture. For `lightning-matrix`, LTO covers the C++/Qt tree and
-cargo's own fat LTO covers the Rust SDK, which gets the same CPU baseline
-through `RUSTFLAGS=-C target-cpu=x86-64-v3`.
-
-`lightning-matrix` (AUR `lightning-matrix-appimage`) is built from upstream's
-source release instead of repacking the AppImage: Qt 6/QML for the UI and the
-official Rust Matrix SDK for sync, E2EE and calls. It conflicts with the AUR
-AppImage package. The Rust crates are fetched from `Cargo.lock` in `prepare()`
-and the build then runs cargo with `--offline --locked`; the bundled updater is
-left in its `development` install type so it never replaces pacman-managed
-files.
+See [PACKAGES.md](PACKAGES.md) for the package list and where each version
+comes from.
 
 ## How it works
 
@@ -79,9 +23,9 @@ schedule (*/30) ─► plan ─────────► build (matrix, archli
 
 1. `plan` runs every `packages/*/update.sh`. An updater resolves the latest
    upstream version and rewrites `pkgver`, `pkgrel` and the upstream commit in
-   the PKGBUILD. Unchanged packages are skipped. The `cursor` updater also reads
-   the Electron major bundled in the new `.deb` and rewrites `_electron` (the
-   system `electronNN` dependency) when Cursor moves to a new major.
+   the PKGBUILD. Unchanged packages are skipped. An updater may also rewrite
+   package-specific helper variables (for example the Electron major a `.deb`
+   bundles).
 2. `build` runs one Arch container per changed package: `updpkgsums`,
    `makepkg --printsrcinfo`, `makepkg`, then uploads the package and refreshed
    metadata as a workflow artifact.
@@ -114,9 +58,8 @@ what actually changed:
 | `srcdest-<package>-<pkgver>` | upstream sources in makepkg's `SRCDEST` | `build`, retry rebuild in `smoke` |
 | `ccache-<package>-*` | ccache compiler results | source builds in `build`, retry rebuild in `smoke` |
 
-Only source packages (`build()` in the PKGBUILD — currently
-`valgrind-codspeed` and `lightning-matrix`) use ccache; the binary repacks have
-nothing to compile.
+Only source packages (`build()` in the PKGBUILD) use ccache; the binary repacks
+have nothing to compile.
 ccache is enabled through makepkg's own `ccache` `BUILDENV` in
 `scripts/container-build.sh`, so no PKGBUILD needs to change, and it is capped
 at 1 GiB (`CCACHE_MAXSIZE`). Each build job prints `ccache --show-stats`, which
@@ -169,7 +112,7 @@ Then:
 
 ```bash
 sudo pacman -Sy arch-repo
-sudo pacman -S cursor grok-bot termius gitcomet codspeed lightning-matrix
+sudo pacman -S <package>
 ```
 
 Pacman appends `arch-repo.db`, `arch-repo.files` and package filenames to that
@@ -222,9 +165,8 @@ hand. A push to `main` also rebuilds the packages it touched, with a `pkgrel`
 bump; that is how hand-edited PKGBUILDs get published.
 
 Source packages (a PKGBUILD with a `build()`) are rebuilt on every such push.
-Binary repacks (`cursor`, `grok-bot`, `termius`, `gitcomet`, `codspeed`) are
-rebuilt only when the push changes what they download — `pkgver`, `pkgrel` or a
-`_`-prefixed helper such as cursor's `_commit` — or when the package is new.
+Binary repacks are rebuilt only when the push changes what they download —
+`pkgver`, `pkgrel` or a `_`-prefixed helper — or when the package is new.
 An edit to their comments, dependencies or `smoke.conf` is skipped, because
 rebuilding only re-packs the same upstream artifact, and their new versions
 come from their updater alone. To ship such an edit, run the workflow manually

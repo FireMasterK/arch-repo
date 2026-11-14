@@ -1,0 +1,109 @@
+# Maintainer: Kavin <20838718+FireMasterK@users.noreply.github.com>
+# Based on the AUR gnome-text-editor-without-save-dialog package and Arch's
+# gnome-text-editor package.
+
+_pkgname=gnome-text-editor
+pkgname=${_pkgname}-without-save-dialog
+pkgver=51.0
+pkgrel=1
+pkgdesc='Simple text editor for the GNOME desktop, without the save dialog on close'
+arch=('x86_64')
+url='https://apps.gnome.org/TextEditor/'
+license=('GPL-3.0-or-later')
+depends=(
+  dconf
+  editorconfig-core-c
+  glib2
+  glibc
+  gtk4
+  gtksourceview5
+  hicolor-icon-theme
+  libadwaita
+  libgcc
+  libspelling
+  pango
+)
+# The build container installs makedepends only, so the libraries meson looks
+# up with pkg-config are repeated here (as the other source packages do).
+makedepends=(
+  appstream
+  dconf
+  editorconfig-core-c
+  glib2
+  glib2-devel
+  gtk4
+  gtksourceview5
+  hicolor-icon-theme
+  libadwaita
+  libspelling
+  meson
+  mold
+  pango
+  yelp-tools
+)
+provides=('gnome-text-editor')
+conflicts=('gnome-text-editor')
+options=('!debug' '!lto')
+
+# CachyOS' compiler flags (pacman/makepkg.conf), pinned to the x86-64-v3
+# baseline instead of -march=native so the package stays portable, and linked
+# with mold. -march=native and -march=znver* are avoided on purpose: the
+# package is built on GitHub's Azure runners (Skylake/EPYC), so `native` would
+# silently target the wrong microarchitecture.
+_cflags=(
+  -march=x86-64-v3 -mtune=generic -O3 -pipe
+  -fno-plt -fexceptions
+  -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security
+  -fstack-clash-protection -fcf-protection
+)
+_ldflags=(
+  -Wl,-O1 -Wl,--sort-common -Wl,--as-needed
+  -Wl,-z,relro -Wl,-z,now -Wl,-z,pack-relative-relocs
+  -fuse-ld=mold
+)
+_lto=(-flto=auto)
+
+_upstream="${_pkgname}-${pkgver}"
+
+source=(
+  "${_upstream}.tar.gz::https://gitlab.gnome.org/GNOME/${_pkgname}/-/archive/${pkgver}/${_upstream}.tar.gz"
+  'avoid_save_dialog_on_close.patch'
+)
+sha256sums=('438bf492db7a98589d0c00fb4edcc7fda7cceaf99bf30ee022b1423e54e1f35d'
+            '5f4e4b5a952dbe6a9fc813c4b1dbf89782b711a2faf7a809f1a70542bc5e170a')
+
+prepare() {
+  cd "$_upstream"
+
+  # Close and quit save the session (including drafts) instead of asking about
+  # unsaved pages first. The dialog is only bypassed, so nothing is lost.
+  patch -p1 --forward --fuzz=3 -i "$srcdir/avoid_save_dialog_on_close.patch"
+}
+
+build() {
+  cd "$_upstream"
+
+  export CFLAGS="${_cflags[*]} ${_lto[*]}"
+  export LDFLAGS="${_ldflags[*]} ${_lto[*]}"
+
+  # A reused $srcdir (local rebuilds) may still hold a configured build tree
+  # from a previous flag set, which `meson setup` would silently reuse.
+  rm -rf build
+
+  meson setup build \
+    --prefix=/usr \
+    --buildtype=plain \
+    --wrap-mode=nodownload \
+    -Dbugreport_url='https://github.com/FireMasterK/arch-repo/issues'
+  meson compile -C build
+}
+
+check() {
+  cd "$_upstream"
+  meson test -C build --print-errorlogs
+}
+
+package() {
+  cd "$_upstream"
+  meson install -C build --no-rebuild --destdir "$pkgdir"
+}
