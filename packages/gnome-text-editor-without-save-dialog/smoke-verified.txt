@@ -1,5 +1,7 @@
 glibc 2.44+r50+g1848099f063e-1 2.44+r78+gfcfb867c58ab-1
-gst-plugins-bad-libs 1.28.9-1 1.28.9-2
-gst-plugins-base-libs 1.28.9-1 1.28.9-2
-gstreamer 1.28.9-1 1.28.9-2
+gst-plugins-bad-libs 1.28.9-1 1.28.9-3
+gst-plugins-base-libs 1.28.9-1 1.28.9-3
+gstreamer 1.28.9-1 1.28.9-3
 libffi 3.8.0-1 3.8.1-1
+libpipewire 1:1.6.11-1 1:1.6.11-2
+pipewire 1:1.6.11-1 1:1.6.11-2
