@@ -1,7 +1,7 @@
 pkgbase = gnome-text-editor-without-save-dialog
 	pkgdesc = Simple text editor for the GNOME desktop, without the save dialog on close
 	pkgver = 51.0
-	pkgrel = 2
+	pkgrel = 3
 	url = https://apps.gnome.org/TextEditor/
 	arch = x86_64
 	license = GPL-3.0-or-later

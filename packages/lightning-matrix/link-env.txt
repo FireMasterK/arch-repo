@@ -26,3 +26,4 @@ libm.so.6	glibc
 libsecret-1.so.0	libsecret
 libstdc++.so.6	libstdc++
 libz.so.1	zlib
+libz.so.1	zlib-ng-compat

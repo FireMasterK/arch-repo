@@ -5,7 +5,7 @@
 _pkgname=gnome-text-editor
 pkgname=${_pkgname}-without-save-dialog
 pkgver=51.0
-pkgrel=2
+pkgrel=3
 pkgdesc='Simple text editor for the GNOME desktop, without the save dialog on close'
 arch=('x86_64')
 url='https://apps.gnome.org/TextEditor/'
