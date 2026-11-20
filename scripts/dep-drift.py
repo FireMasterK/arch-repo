@@ -10,6 +10,11 @@ on a current Arch install. The baseline is the `installed = ...` block from the
 `.BUILDINFO` of the package that is currently published, recorded at publish
 time: it lists every package present when the binary was compiled.
 
+When `packages/<name>/link-env.txt` exists, only the packages that ship the
+libraries the binary actually links are compared (see `link_drift`). Without it
+the declared runtime closure is walked instead, which also covers packages the
+binary never loads — a CA bundle, for example.
+
 The single-package form prints one `<name> <built> <now>` line per dependency
 whose version moved, and exits 0 when there is drift, 1 when there is none, 2
 when nothing is comparable.
@@ -24,6 +29,7 @@ package requested.
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 ARCH_SUFFIXES = ("x86_64", "any", "i686", "aarch64")
@@ -108,9 +114,13 @@ def parse_baseline(path: pathlib.Path, known: set[str]) -> dict[str, str]:
 
 def resolve(name: str, packages: dict[str, dict], providers: dict[str, list[str]]) -> str | None:
     """Map a dependency name (possibly a soname or virtual) to a package name."""
-    if name in packages:
-        return name
-    candidates = providers.get(name.split("=", 1)[0])
+    # `pacman -Si` writes a versioned dependency as `name=version` (or `>=`),
+    # and the bare name is what identifies the package. Without this the whole
+    # subtree behind a versioned dependency is dropped from the closure.
+    base = re.split(r"[<>=]", name, maxsplit=1)[0]
+    if base in packages:
+        return base
+    candidates = providers.get(base)
     if not candidates:
         return None
     for candidate in candidates:
@@ -158,6 +168,33 @@ def runtime_closure(
     return closure
 
 
+def link_drift(
+    baseline: pathlib.Path,
+    link_env: pathlib.Path,
+    packages: dict[str, dict],
+) -> tuple[list[tuple[str, str, str]], int]:
+    """Compare the versions of the packages that ship the libraries the binary links.
+
+    `link-env.txt` records `soname<TAB>package` for every DT_NEEDED entry, so
+    only libraries the binary actually loads are tracked. A data-only package
+    such as a CA bundle never appears, because it ships no shared object.
+    """
+    owners = set()
+    for line in link_env.read_text().splitlines():
+        _, _, owner = line.partition("\t")
+        if owner:
+            owners.add(owner)
+    built = parse_baseline(baseline, owners)
+
+    changed = []
+    for name in sorted(owners):
+        was = built.get(name)
+        now = packages.get(name, {}).get("version")
+        if was and now and was != now:
+            changed.append((name, was, now))
+    return changed, len(built)
+
+
 def drift(
     root: pathlib.Path,
     package: str,
@@ -168,6 +205,18 @@ def drift(
     """Return the exit code and the `<name> <built> <now>` entries for a package."""
     if not baseline.is_file():
         return NO_BASELINE, []
+
+    # A recorded link set is the stricter baseline: only the libraries the
+    # binary actually loads are compared, so a data-only package that its
+    # declared dependencies pull in (a CA bundle) cannot trigger a re-check.
+    link_env = root / "packages" / package / "link-env.txt"
+    if link_env.is_file():
+        changed, matched = link_drift(baseline, link_env, packages)
+        if changed:
+            return DRIFT, changed
+        if not matched:
+            return NO_BASELINE, []
+        return UNCHANGED, []
 
     closure = runtime_closure(root, package, packages, providers)
     # Only closure names are ever read back out of the result, and matching

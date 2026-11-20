@@ -122,6 +122,34 @@ for (name, ver), items in groups.items():
         path.unlink()
 PY
 
+# Record the libraries the binary actually links, resolved to the package that
+# ships each one. Drift then tracks what the app loads instead of everything its
+# declared dependencies pull in: a CA bundle is data, not a link, so it never
+# appears here. The file database is downloaded once per publish run.
+file_db_ready=false
+record_link_env() {
+  local pkg=$1 dir=$2 file=$3 sonames map
+  rm -f "$dir/link-env.txt"
+  sonames=$(python3 "$here/link-audit.py" --sonames --tarball "$file" \
+    "$root" "$dir" "$pkg" 2>/dev/null) || return 0
+  [[ -n $sonames ]] || return 0
+  if ! $file_db_ready; then
+    pacman -Fy >/dev/null 2>&1 || return 0
+    file_db_ready=true
+  fi
+  # shellcheck disable=SC2086
+  # A soname the file database does not know must not discard the whole map, so
+  # pacman's status is dropped before the pipeline is read.
+  map=$({ pacman -F $sonames 2>/dev/null || true; } | awk '
+    /^[^ \t]/ { pkg = $1; sub(/^[^\/]*\//, "", pkg); next }
+    /^[ \t]/  { path = $1; n = split(path, a, "/"); base = a[n];
+                if (path == "usr/lib/" base) print base "\t" pkg }
+  ')
+  [[ -n $map ]] || return 0
+  printf '%s\n' "$map" >"$dir/link-env.txt"
+  log "recorded the linked libraries of $pkg ($(wc -l <"$dir/link-env.txt") sonames)"
+}
+
 # Record what each source package was built against: `.BUILDINFO` lists the
 # packages present at build time. The smoke job compares this with the current
 # repositories and only re-checks the published build when something moved.
@@ -141,6 +169,7 @@ for dir in "$root"/packages/*/; do
     # verified about the build it replaces no longer applies.
     rm -f "$dir/smoke-verified.txt"
     log "recorded the build environment of $pkg ($(wc -l <"$dir/build-env.txt") packages)"
+    record_link_env "$pkg" "$dir" "$file"
   else
     rm -f "$tmp"
     log "warning: $pkg has no .BUILDINFO, cannot track its dependencies"
@@ -187,6 +216,7 @@ if [[ $dry_run != 1 ]]; then
       [[ -s $tmp/baseline ]]; then
       mv -f "$tmp/baseline" "$dir/build-env.txt"
       log "$pkg: recorded the build environment of the published $key"
+      record_link_env "$pkg" "$dir" "$tmp/package.pkg.tar.zst"
     fi
     rm -rf "$tmp"
   done

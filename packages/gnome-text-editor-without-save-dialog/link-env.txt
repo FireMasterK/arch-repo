@@ -1,0 +1,12 @@
+libadwaita-1.so.0	libadwaita
+libc.so.6	glibc
+libeditorconfig.so.0	editorconfig-core-c
+libgcc_s.so.1	libgcc
+libgio-2.0.so.0	glib2
+libglib-2.0.so.0	glib2
+libgobject-2.0.so.0	glib2
+libgtk-4.so.1	gtk4
+libgtksourceview-5.so.0	gtksourceview5
+libm.so.6	glibc
+libpango-1.0.so.0	pango
+libspelling-1.so.2	libspelling

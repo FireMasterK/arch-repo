@@ -241,15 +241,23 @@ packages with drift (or a build from this run) appear in `test_matrix`.
 
 `scripts/dep-drift.sh` compares the dependency values recorded at publish time
 (`packages/<name>/build-env.txt`, taken from the published package's
-`.BUILDINFO`) with the versions in the current Arch repositories, walking the
-runtime dependency closure and resolving sonames such as `libncursesw.so=6` to
-the package that provides them. Build-only dependencies (makedepends, the
-toolchain) are ignored, and reported drift looks like:
+`.BUILDINFO`) with the versions in the current Arch repositories. Build-only
+dependencies (makedepends, the toolchain) are ignored, and reported drift looks
+like:
 
 ```text
 glibc 2.43-2 2.44+r50+g1848099f063e-1
 libarchive 3.7.7-1 3.8.11-1
 ```
+
+What counts as a dependency is the libraries the binary actually links:
+`packages/<name>/link-env.txt` records `soname<TAB>package` for every
+`DT_NEEDED` entry, resolved against the file database at publish time. Only
+those packages are compared, so a data-only package that the declared
+dependencies pull in — a CA bundle, for example — cannot trigger a re-check.
+Packages published before `link-env.txt` existed fall back to walking the
+declared runtime closure from `.SRCINFO`, resolving sonames such as
+`libncursesw.so=6` to the package that provides them.
 
 Only source packages are tracked this way: a binary repack cannot be rebuilt, so
 re-checking it would only cost time.
@@ -314,8 +322,30 @@ Run the same checks locally against `out/` (or any directory with
 ./scripts/local-smoke.sh cursor          # one package
 LOG_DIR=/tmp/logs ./scripts/local-smoke.sh grok-bot
 ./scripts/dep-drift.sh valgrind-codspeed # did its runtime dependencies move?
+./scripts/link-audit.sh lightning-matrix # what does it actually link to?
 ./scripts/fetch-published.sh valgrind-codspeed /tmp/pub   # download the published build
 REPORT_DRY_RUN=1 ./scripts/report-smoke-failure.sh grok-bot   # print the issue body
+```
+
+`dep-drift.sh` compares the dependency closure declared in `depends=`.
+`link-audit.sh` reads the binaries instead: it scans every ELF file in the built
+package for its `DT_NEEDED` entries and reports which Arch package owns each
+soname, split into `direct` (named in `depends=`), `transitive` (reached through
+another dependency), `undeclared` (nothing in `depends=` leads to it) and
+`unresolved`. It exits 1 when something is undeclared, so a library the app
+links but never declared cannot hide behind the declared closure.
+
+The same scan is what `publish` uses to write `packages/<name>/link-env.txt`, so
+the drift check and this report always agree on what the binary links.
+
+Ownership comes from the `provides` entries in the package database, which is
+fast but incomplete — Qt and GStreamer declare no sonames at all. Add
+`--file-db` to resolve against `pacman -F` instead, which is authoritative but
+downloads the file databases (about 15 s in a warm image):
+
+```bash
+./scripts/link-audit.sh --file-db lightning-matrix
+./scripts/link-audit.sh --verbose grok-bot   # one line per soname
 ```
 
 Logs land in `smoke-logs/<package>/`, which is gitignored. Build products staged
@@ -416,7 +446,8 @@ Packages themselves are not signed by `makepkg`; sign them too (or use
 | Smoke test fails with `renderer page appeared` / `no renderer page` | The wrapper launched but the UI never rendered. Compare `chrome.log` with the previous release; this usually means a missing runtime dependency or a broken asar/wrapper patch. |
 | Smoke test fails on `failed to install` | A runtime dependency is missing from `depends=`, or the package name changed upstream. The pacman error is in `pacman-install.log`. |
 | Source package rebuilt for no obvious reason | Its check failed against the current Arch packages and passed after a rebuild — usually a library or toolchain update. `REBUILD=fixed` in `smoke-logs/<package>/retry/summary.txt` confirms it; the rebuilt package (higher `pkgrel`) is what got published. |
-| Source package shows `runtime dependencies changed` and passes | The published build still works on the new libraries. Nothing is rebuilt, the dependency set is recorded in `packages/<name>/smoke-verified.txt` so it is not re-checked again, and the next publish refreshes `packages/<name>/build-env.txt`. |
+| Source package shows `runtime dependencies changed` and passes | The published build still works on the new libraries. Nothing is rebuilt, the dependency set is recorded in `packages/<name>/smoke-verified.txt` so it is not re-checked again, and the next publish refreshes `packages/<name>/build-env.txt` and `link-env.txt`. |
+| A package re-checks on every run for the same library | Its `link-env.txt` is missing, so drift falls back to the declared closure and keeps seeing packages the binary never loads. The next publish writes it; `scripts/link-audit.sh` shows what the binary actually links. |
 | Smoke job skipped with `could not fetch the published build` | The smoke job could not read the repository. Set `S3_PUBLIC_BASE_URL`, or keep `S3_BUCKET` plus the `AWS_*` secrets set (the workflow passes the publisher's settings). The reason is logged as a warning just above the skip. |
 | `no build baseline recorded yet` | The package has not been published since `build-env.txt` tracking was added. The next successful publish writes it. |
 | `REBUILD=failed` in a summary | The rebuild itself broke (upstream source gone, checksum change). The attached logs are from the failing original build. |
