@@ -1,7 +1,7 @@
 pkgbase = lightning-matrix
 	pkgdesc = Native Qt 6 Matrix desktop client using the official Rust Matrix SDK
-	pkgver = 0.10.6
-	pkgrel = 2
+	pkgver = 0.10.7
+	pkgrel = 1
 	url = https://www.lightning-matrix.org/
 	arch = x86_64
 	license = GPL-3.0-or-later
@@ -46,7 +46,7 @@ pkgbase = lightning-matrix
 	optdepends = xdg-desktop-portal: screen sharing under Wayland
 	conflicts = lightning-matrix-appimage
 	options = !debug
-	source = lightning-0.10.6.tar.gz::https://github.com/Mizerd/lightning/archive/refs/tags/v0.10.6.tar.gz
-	sha256sums = 074ab4acef3d020abe3d90633fed3270858b234d341db2c7cc686915cb498975
+	source = lightning-0.10.7.tar.gz::https://github.com/Mizerd/lightning/archive/refs/tags/v0.10.7.tar.gz
+	sha256sums = c1c07f0f905d1bfdd774a50979754e2551a4f60a62dd0aa1940db97e98aa7fee
 
 pkgname = lightning-matrix

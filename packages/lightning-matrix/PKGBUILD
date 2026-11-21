@@ -2,8 +2,8 @@
 # Based on the AUR lightning-matrix-appimage package.
 
 pkgname=lightning-matrix
-pkgver=0.10.6
-pkgrel=2
+pkgver=0.10.7
+pkgrel=1
 pkgdesc='Native Qt 6 Matrix desktop client using the official Rust Matrix SDK'
 arch=('x86_64')
 url='https://www.lightning-matrix.org/'
@@ -86,7 +86,7 @@ _rustflags=(-C target-cpu=x86-64-v3 -C link-arg=-fuse-ld=mold)
 _upstream="lightning-${pkgver}"
 
 source=("${_upstream}.tar.gz::https://github.com/Mizerd/lightning/archive/refs/tags/v${pkgver}.tar.gz")
-sha256sums=('074ab4acef3d020abe3d90633fed3270858b234d341db2c7cc686915cb498975')
+sha256sums=('c1c07f0f905d1bfdd774a50979754e2551a4f60a62dd0aa1940db97e98aa7fee')
 
 prepare() {
   # CMake drives cargo with --offline --locked, so the crates pinned by
