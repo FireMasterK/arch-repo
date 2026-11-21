@@ -2,7 +2,7 @@
 # Based on the AUR codspeed-bin package.
 
 pkgname=codspeed
-pkgver=5.7.0
+pkgver=5.8.0
 pkgrel=1
 pkgdesc='CodSpeed test runner'
 arch=('x86_64')
@@ -19,7 +19,7 @@ _asset="codspeed-runner-x86_64-unknown-linux-musl"
 source=(
   "${_asset}.tar.gz::https://github.com/CodSpeedHQ/codspeed/releases/download/v${pkgver}/${_asset}.tar.gz"
 )
-sha256sums=('6cc4177e65cab1467c897991e8a9245dd825376f3f03cd1577c9df00dedf7d5f')
+sha256sums=('e2c236ce214333b2989dce5912d1ddb923b808bb6cba0bf5cd1fc335aa7ee340')
 
 package() {
   install -Dm755 "${_asset}/codspeed" "$pkgdir/usr/bin/codspeed"
