@@ -2,8 +2,8 @@
 # Based on the AUR gitcomet-bin package.
 
 pkgname=gitcomet
-pkgver=0.3.4
-pkgrel=2
+pkgver=0.3.5
+pkgrel=1
 pkgdesc='Fast, resource-efficient Git GUI written in Rust'
 arch=('x86_64')
 url='https://gitcomet.dev/'
@@ -44,7 +44,7 @@ options=('!strip' '!debug')
 # the source archive the AUR package downloads for those assets.
 _deb="gitcomet_${pkgver}-1_amd64.deb"
 source=("${_deb}::https://github.com/Auto-Explore/GitComet/releases/download/v${pkgver}/${_deb}")
-sha256sums=('4380ce7e967ba810c7a6c91b6e018ac6aaf2f40f413fe433147d2c38b4b6df67')
+sha256sums=('9eede0a1fee6ff334cdf485255b2831e1058630d9671f4607ada15b0519a6b1c')
 noextract=("$_deb") # package() streams data.tar.zst out of the deb itself.
 
 package() {
