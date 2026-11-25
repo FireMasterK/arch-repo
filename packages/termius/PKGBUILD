@@ -3,7 +3,7 @@
 
 pkgname=termius
 pkgver=10.4.1
-pkgrel=1
+pkgrel=2
 pkgdesc='Modern SSH client for Linux'
 arch=('x86_64')
 url='https://www.termius.com/'
