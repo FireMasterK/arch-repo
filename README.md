@@ -172,6 +172,13 @@ rebuilding only re-packs the same upstream artifact, and their new versions
 come from their updater alone. To ship such an edit, run the workflow manually
 with `force` (and `packages` set to it, if you like).
 
+A package the repository has never published is scheduled anyway, even when its
+version did not change. Otherwise a binary repack added by a push that skipped
+it would stay out of the repository until upstream happened to bump its
+version. The plan job lists the published db with
+`scripts/published-packages.sh` and builds such a package once; if the
+repository cannot be read, it schedules nothing extra.
+
 A push that changes `scripts/build-package.sh` forces every package, because
 that script decides how all of them are compiled. Other scripts under
 `scripts/` do not change what a package contains, so a push touching only them

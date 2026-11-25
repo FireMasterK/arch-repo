@@ -42,6 +42,35 @@ force_pkg() {
   contains "$1" "${force_filter[@]}"
 }
 
+# The published repository is read at most once per run, and only when a
+# package's version did not change. A package nobody has published (typically a
+# binary repack added by a push that did not force it) has to be built once: its
+# updater reports it as up to date from then on, so waiting for a version change
+# would leave it out of the repository indefinitely.
+published=''
+published_state=
+ensure_published() {
+  [[ -n $published_state ]] && return 0
+  if published=$("$here/published-packages.sh"); then
+    published_state=known
+  else
+    log 'warning: could not list the published repository; skipping the unpublished-package check'
+    published_state=unknown
+  fi
+}
+
+# published_as <package-name>
+# True when the repository lists any build of this package. An unreadable
+# repository counts as published, so a transient S3 error cannot schedule every
+# package for a rebuild.
+published_as() {
+  [[ $published_state == known ]] || return 0
+  awk -v prefix="$1-" '
+    index($0, prefix) == 1 && substr($0, length(prefix) + 1) ~ /^[0-9]/ { found = 1 }
+    END { exit !found }
+  ' <<<"$published"
+}
+
 changed=()
 failed=()
 # pkgver per package, used by the workflow to key the source-download cache.
@@ -81,6 +110,17 @@ while IFS= read -r dir; do
   elif force_pkg "$pkg"; then
     bump_pkgrel "$dir/PKGBUILD"
     changed+=("$pkg")
+  else
+    # Nothing changed upstream, but a package that has never been published
+    # still needs one build. Use the packaged name, which can differ from the
+    # directory name.
+    ensure_published
+    name=$(sed -n 's/^pkgname = //p' "$dir/.SRCINFO" 2>/dev/null | head -n 1)
+    [[ -n $name ]] || name=$pkg
+    if ! published_as "$name"; then
+      log "$pkg: not in the published repository, scheduling a build"
+      changed+=("$pkg")
+    fi
   fi
 done < <(package_dirs "$root")
 

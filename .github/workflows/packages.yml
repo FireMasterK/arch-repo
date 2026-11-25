@@ -202,6 +202,19 @@ jobs:
           FORCE_PACKAGES: ${{ steps.changed.outputs.packages }}
           # Updaters that query the GitHub API use this for a higher rate limit.
           GITHUB_TOKEN: ${{ github.token }}
+          # The plan reads the published repository so a package that has never
+          # been published (for example a binary repack added by a push that did
+          # not force it) is built once instead of waiting for upstream to move.
+          # Same access the smoke job uses: the public URL when configured,
+          # otherwise signed requests with the publisher's credentials.
+          S3_PUBLIC_BASE_URL: ${{ vars.S3_PUBLIC_BASE_URL }}
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
+          S3_REGION: ${{ vars.S3_REGION }}
+          S3_PREFIX: ${{ vars.S3_PREFIX }}
+          S3_ADDRESSING_STYLE: ${{ vars.S3_ADDRESSING_STYLE }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: ./scripts/plan-updates.sh
 
       - name: Decide which published builds to re-check
