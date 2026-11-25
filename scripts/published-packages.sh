@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# List the packages present in the published repository.
+# List the package names present in the published repository.
 #
 # The plan job uses this to notice a package nobody has published yet, so it is
 # built once instead of waiting for its next upstream release. That covers a
@@ -7,9 +7,13 @@
 # every later run reports it as up to date, and without this check it would stay
 # unpublished until upstream happened to bump its version.
 #
+# The same list is reconciled against packages/ so a package whose directory was
+# deleted is removed from the repository even when the push that deleted it was
+# skipped because an older run was still going.
+#
 # Usage: scripts/published-packages.sh
 #
-# Prints one `<name>-<version>-<rel>-<arch>.pkg.tar.zst` per line.
+# Prints one package name per line.
 #
 # Exit codes:
 #   0 - the repository was read
@@ -85,7 +89,8 @@ else
 fi
 
 # `repo-add` stores one directory per package in the db tarball; each holds a
-# `desc` file whose first entry is the file name. The package directory also
-# holds `desc`/`files`, so match only the file-name entry.
+# `desc` file with `%NAME%` followed by the package name on the next line. The
+# filename is not used: a package name may contain hyphens, so splitting it out
+# of `name-version-rel-arch.pkg.tar.zst` is ambiguous.
 tar -xzOf "$tmp" --wildcards '*/desc' 2>/dev/null |
-  grep -E '^[^/]+\.pkg\.tar\.zst$' || true
+  awk '/^%NAME%$/ { getline; print }' || true

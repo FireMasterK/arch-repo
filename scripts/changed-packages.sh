@@ -23,18 +23,21 @@
 #   tooling  - "true" when the push changed scripts/build-package.sh, which
 #              shapes every package's output, so all of them are forced
 #   skip     - "true" when the pushed commit carried SKIP_MARKER, which empties
-#              both outputs above
+#              both build outputs above
+#   removed  - space separated package names whose directories the push deleted,
+#              so the publisher removes them from the repository
 #
-# The two are mutually exclusive: when tooling is "true", `packages` is empty
-# and the workflow forces every package. An empty `packages` with tooling
-# "false" means the push has nothing to force.
+# The two build outputs are mutually exclusive: when tooling is "true",
+# `packages` is empty and the workflow forces every package. An empty `packages`
+# with tooling "false" means the push has nothing to force.
 #
 # A push can opt out of forcing entirely: when the pushed commit's message
-# contains the skip marker (SKIP_MARKER, see below), both outputs are emitted
-# empty and the run behaves like a scheduled upstream check. That is for
+# contains the skip marker (SKIP_MARKER, see below), the build outputs are
+# emitted empty and the run behaves like a scheduled upstream check. That is for
 # commits that land under packages/ or scripts/ without changing what gets
 # built - refreshed metadata, a comment, a README - which would otherwise
-# rebuild (and republish) packages nobody touched.
+# rebuild (and republish) packages nobody touched. Deletions are still reported:
+# removing a package is an explicit change to the repository, not a rebuild.
 #
 # Environment:
 #   BEFORE, AFTER - commits to compare (defaults to HEAD^ and HEAD locally)
@@ -55,6 +58,7 @@ if [[ -z $before || -z $after ]]; then
 fi
 
 packages=()
+removed=()
 tooling=false
 skip=false
 
@@ -79,6 +83,43 @@ binary_repack_changed() {
   new=$(pkg_identity "$2" "$3")
   [[ -z $old || $old != "$new" ]]
 }
+
+# deleted_package_names <rev> <directory>
+# Prints every package name of a directory as it was before its deletion. The
+# names are read from the old revision because the directory is gone here, and
+# pkgname is not required to match the directory name.
+deleted_package_names() {
+  local rev=$1 pkg=$2 names
+  names=$(git -C "$root" show "$rev:packages/$pkg/.SRCINFO" 2>/dev/null |
+    sed -n 's/^pkgname = //p')
+  if [[ -z $names ]]; then
+    names=$(git -C "$root" show "$rev:packages/$pkg/PKGBUILD" 2>/dev/null |
+      sed -n 's/^pkgname=//p' | head -n 1)
+  fi
+  printf '%s\n' "${names:-$pkg}"
+}
+
+# A deleted package directory means the package is removed from the published
+# repository; there is nothing to build. It is reported even when the commit
+# opted out of rebuilding, because the deletion is the intent itself.
+if [[ -n $before && ! $before =~ ^0+$ ]]; then
+  if deleted=$(git -C "$root" diff --name-only --diff-filter=D "$before" "$after"); then
+    while IFS= read -r pkg; do
+      [[ -n $pkg ]] || continue
+      [[ ! -f $root/packages/$pkg/PKGBUILD ]] || continue
+      log "$pkg: package directory deleted, removing it from the repository"
+      while IFS= read -r name; do
+        [[ -n $name ]] || continue
+        removed+=("$name")
+      done < <(deleted_package_names "$before" "$pkg")
+    done < <(sed -n 's#^packages/\([^/]*\)/.*#\1#p' <<<"$deleted" | sort -u)
+    if ((${#removed[@]})); then
+      mapfile -t removed < <(printf '%s\n' "${removed[@]}" | sort -u)
+    fi
+  else
+    log "could not diff $before..$after for deleted packages"
+  fi
+fi
 
 # The pushed head commit is the one whose intent this run is acting on, so only
 # its message is consulted. Checking the whole range instead would let a marker
@@ -113,8 +154,8 @@ elif grep -qxF -- 'scripts/build-package.sh' <<<"$files"; then
   log 'push changed the build driver (scripts/build-package.sh); forcing every package'
   tooling=true
 else
-  # Deleted package directories are left out: there is nothing to build, and
-  # removing a package from the published database is a manual step.
+  # Deleted package directories are not in this diff (it keeps additions,
+  # copies, modifications and renames); they were collected above as removals.
   while IFS= read -r pkg; do
     [[ -n $pkg ]] || continue
     [[ -f $root/packages/$pkg/PKGBUILD ]] || continue
@@ -145,6 +186,11 @@ emit() {
 emit "packages=${packages[*]-}"
 emit "tooling=$tooling"
 emit "skip=$skip"
+emit "removed=${removed[*]-}"
+
+if ((${#removed[@]})); then
+  log "to remove from the repository: ${removed[*]}"
+fi
 
 if [[ $skip == true ]]; then
   log 'nothing will be force-rebuilt; upstream version checks still run'

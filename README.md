@@ -36,7 +36,8 @@ schedule (*/30) ─► plan ─────────► build (matrix, archli
    runtime dependencies has a new version. A package that fails is rebuilt once
    against the current Arch packages and retested; if it still fails, a GitHub
    issue with the logs is opened. Failures do not block publishing.
-4. `publish` restores the current `arch-repo.db` from S3, runs `repo-add`,
+4. `publish` restores the current `arch-repo.db` from S3, removes the entries of
+   packages whose directory the push deleted, runs `repo-add`,
    uploads the packages first and the database last (so the db never points at
    a missing object), prunes old versions, and commits the refreshed PKGBUILDs
    back to `main`. A package rebuilt by the smoke job replaces the original
@@ -195,6 +196,23 @@ No package is force-rebuilt then; the run only does what a scheduled run does,
 so an upstream version change in the same window still builds. This suits
 metadata refreshes and comment or README edits. A different marker can be set
 with `SKIP_MARKER` when running the script by hand.
+
+## Removing a package
+
+Delete its `packages/<name>/` directory and push. The plan reports the package
+names from the deleted `.SRCINFO` (so a directory whose `pkgname` differs still
+resolves), and `publish` removes those names from `arch-repo.db` and
+`arch-repo.files` with `repo-remove`, then deletes their uploaded files. A
+`-debug` package shipped from the same directory is removed with it. The
+objects are deleted only after the updated database is in place, so a client
+still holding the previous (60-second cached) db does not hit a missing file.
+
+The plan job also reconciles the published database against `packages/` on every
+run: a published package with no directory left is removed too. That covers a
+deletion whose push run skipped itself because an earlier run was going, so a
+removal cannot be lost by a skipped workflow. `[skip build]` does not suppress a
+removal. Removing a package that was never published is a no-op; the publisher
+logs a warning for the missing entry.
 
 ## Startup checks
 
@@ -460,3 +478,4 @@ Packages themselves are not signed by `makepkg`; sign them too (or use
 | `REBUILD=failed` in a summary | The rebuild itself broke (upstream source gone, checksum change). The attached logs are from the failing original build. |
 | `REBUILD=ineffective` in `retry/summary.txt` | The package was rebuilt against current Arch packages and still fails. The issue logs are from the retest, so they reflect the newest build. |
 | Smoke job opens issues but the app works for you | The CI container has no GPU, D-Bus session or desktop portal. Only pass `SMOKE_*` settings that tolerate that; existing packages already pass `--disable-gpu` as a test-only workaround. |
+| A deleted package is still in the repository | The plan reconciles published names against `packages/` on every run and logs `published but has no package directory`; look for that or for `removing from the database` in the publish log. If the bucket cannot be read, reconciliation is skipped and no removal is scheduled. |

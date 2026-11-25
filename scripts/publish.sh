@@ -13,6 +13,8 @@
 #   CLOUDFRONT_DISTRIBUTION_ID - optional; invalidated after the db changes
 #   REPO_DB            - pacman db name (default: arch-repo)
 #   KEEP_VERSIONS      - package versions to retain per package (default: 3)
+#   REMOVED            - space separated package names to remove from the
+#                        repository: their db entries and published files
 #   DRY_RUN            - "1" to build the db locally without touching S3
 #   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY - credentials for the upload
 set -euo pipefail
@@ -27,6 +29,10 @@ keep=${KEEP_VERSIONS:-3}
 bucket=${S3_BUCKET:-}
 prefix=${S3_PREFIX:-}
 dry_run=${DRY_RUN:-0}
+removed=()
+if [[ -n ${REMOVED:-} ]]; then
+  read -r -a removed <<<"$REMOVED"
+fi
 
 # Object keys in the repo root are flat; a prefix keeps the URL tidy.
 prefix=${prefix#/}
@@ -63,13 +69,16 @@ if ! compgen -G "$art/*.pkg.tar.zst" >/dev/null; then
   if [[ ${EXPECT_ARTIFACTS:-true} == true ]]; then
     die "no packages found in $art"
   fi
-  log 'nothing to publish'
-  # A re-check that passed still has something to record: without it the plan
-  # job would re-check the same dependency drift on every run until the package
-  # is rebuilt for another reason.
-  sync_verified "$verified" "$root"
-  commit_packages "$root"
-  exit 0
+  if ((${#removed[@]} == 0)); then
+    log 'nothing to publish'
+    # A re-check that passed still has something to record: without it the plan
+    # job would re-check the same dependency drift on every run until the package
+    # is rebuilt for another reason.
+    sync_verified "$verified" "$root"
+    commit_packages "$root"
+    exit 0
+  fi
+  log "no packages to publish; removing from the repository: ${removed[*]}"
 fi
 
 # Records of re-checks that passed alongside packages being published here.
@@ -88,8 +97,9 @@ done
 for file in "$art"/*.pkg.tar.zst; do
   mv -f "$file" "$repo/"
 done
-(($(find "$repo" -maxdepth 1 -name '*.pkg.tar.zst' | wc -l) > 0)) ||
+if ! compgen -G "$repo/*.pkg.tar.zst" >/dev/null && ((${#removed[@]} == 0)); then
   die "no packages found in $art"
+fi
 
 # A package can be staged twice: the original build and a rebuild from the smoke
 # retry. Keep the highest pkgrel of each pkgver so the database never lists both.
@@ -235,15 +245,34 @@ if [[ $dry_run != 1 ]]; then
   done
 fi
 
-log "creating $db database"
-repo-add --nocolor "$repo/$db.db.tar.gz" "$repo"/*.pkg.tar.zst >/dev/null
+# Deleting a package directory removes its entry from the restored database.
+# repo-remove keeps the files database in sync, and a package that is already
+# absent is only a warning: the push may race a publish that shipped it.
+if ((${#removed[@]})) && [[ $dry_run != 1 ]]; then
+  if [[ -f $repo/$db.db.tar.gz ]]; then
+    log "removing from the database: ${removed[*]}"
+    for name in "${removed[@]}"; do
+      repo-remove --nocolor "$repo/$db.db.tar.gz" "$name" >/dev/null ||
+        log "warning: $name: not in the published database"
+    done
+  else
+    log 'the repository has no database yet; nothing to remove from it'
+  fi
+fi
+
+if compgen -G "$repo/*.pkg.tar.zst" >/dev/null; then
+  log "creating $db database"
+  repo-add --nocolor "$repo/$db.db.tar.gz" "$repo"/*.pkg.tar.zst >/dev/null
+fi
 
 # Pacman asks for the literal arch-repo.db / arch-repo.files names.
-rm -f "$repo/$db.db" "$repo/$db.files"
-cp "$repo/$db.db.tar.gz" "$repo/$db.db"
-cp "$repo/$db.files.tar.gz" "$repo/$db.files"
-rm -f "$repo/$db.db.tar.gz" "$repo/$db.files.tar.gz" \
-  "$repo/$db.db.tar.gz.old" "$repo/$db.files.tar.gz.old"
+if [[ -f $repo/$db.db.tar.gz ]]; then
+  rm -f "$repo/$db.db" "$repo/$db.files"
+  cp "$repo/$db.db.tar.gz" "$repo/$db.db"
+  cp "$repo/$db.files.tar.gz" "$repo/$db.files"
+  rm -f "$repo/$db.db.tar.gz" "$repo/$db.files.tar.gz" \
+    "$repo/$db.db.tar.gz.old" "$repo/$db.files.tar.gz.old"
+fi
 
 if [[ $dry_run == 1 ]]; then
   log "dry run complete; repository contents:"
@@ -279,6 +308,28 @@ if [[ -n ${CLOUDFRONT_DISTRIBUTION_ID:-} ]]; then
     --paths "/${prefix}${db}.db" "/${prefix}${db}.files" >/dev/null ||
     log 'warning: CDN invalidation failed; clients may see a stale database briefly'
 fi
+
+# Delete the files of a removed package only after the updated database is
+# uploaded: a client holding the previous db (cached for up to 60 seconds) must
+# not hit a missing object in the window before it refreshes.
+for name in "${removed[@]}"; do
+  [[ -n $name ]] || continue
+  log "removing published files of $name"
+  if ! keys=$(aws s3api list-objects-v2 "${aws_opts[@]}" --bucket "$bucket" \
+    --prefix "$prefix$name-" --query 'Contents[].Key' --output text 2>/dev/null); then
+    log "warning: $name: could not list its published files"
+    continue
+  fi
+  while IFS= read -r key; do
+    [[ -n $key ]] || continue
+    log "removing object: $key"
+    aws s3 rm "${aws_opts[@]}" --only-show-errors "s3://$bucket/$key" >/dev/null
+  done < <(printf '%s\n' "$keys" | tr '\t' '\n' | awk -v p="${prefix}${name}-" '
+      index($0, p) == 1 {
+        rest = substr($0, length(p) + 1)
+        if (rest ~ /^[0-9].*\.pkg\.tar\.zst(\.sig)?$/) print
+      }')
+done
 
 # Keep only the newest $keep versions of each package; old objects are only
 # useful for downgrades and they cost storage.

@@ -7,6 +7,9 @@
 #   test_candidates - JSON array of published source packages whose dependency
 #                     drift should be checked (see scripts/plan-smoke-tests.sh)
 #   failed          - comma separated list of packages whose updater failed
+#   removed         - space separated package names to remove from the
+#                     repository: the push's deletions plus published packages
+#                     whose directory no longer exists
 #
 # Environment:
 #   PACKAGES        - space separated package names to consider (default: all)
@@ -15,6 +18,8 @@
 #   FORCE_PACKAGES  - space separated names FORCE applies to (default: every
 #                     package considered), so a push can force only what it
 #                     touched instead of the whole repository
+#   REMOVED_FROM_PUSH - space separated package names whose directories the
+#                     pushed commit deleted
 set -euo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -25,6 +30,10 @@ source "$here/lib.sh"
 force=${FORCE:-false}
 read -r -a filter <<<"${PACKAGES:-}"
 read -r -a force_filter <<<"${FORCE_PACKAGES:-}"
+push_removals=()
+if [[ -n ${REMOVED_FROM_PUSH:-} ]]; then
+  read -r -a push_removals <<<"$REMOVED_FROM_PUSH"
+fi
 
 contains() {
   local needle=$1 candidate
@@ -60,15 +69,36 @@ ensure_published() {
 }
 
 # published_as <package-name>
-# True when the repository lists any build of this package. An unreadable
-# repository counts as published, so a transient S3 error cannot schedule every
-# package for a rebuild.
+# True when the repository lists this package. An unreadable repository counts
+# as published, so a transient S3 error cannot schedule every package for a
+# rebuild.
 published_as() {
   [[ $published_state == known ]] || return 0
-  awk -v prefix="$1-" '
-    index($0, prefix) == 1 && substr($0, length(prefix) + 1) ~ /^[0-9]/ { found = 1 }
-    END { exit !found }
-  ' <<<"$published"
+  awk -v name="$1" '$0 == name { found = 1 } END { exit !found }' <<<"$published"
+}
+
+# package_names <package-dir>
+# Prints every pkgname the package builds (a split package has several). The
+# directory name is the fallback so a missing .SRCINFO cannot make a published
+# package look deleted.
+package_names() {
+  local names
+  names=$(sed -n 's/^pkgname = //p' "$1/.SRCINFO" 2>/dev/null)
+  if [[ -n $names ]]; then
+    printf '%s\n' "$names"
+  else
+    basename "$1"
+  fi
+}
+
+# package_published <package-dir>
+# True when the repository lists any of the package's names.
+package_published() {
+  local name
+  while IFS= read -r name; do
+    published_as "$name" && return 0
+  done < <(package_names "$1")
+  return 1
 }
 
 changed=()
@@ -115,14 +145,52 @@ while IFS= read -r dir; do
     # still needs one build. Use the packaged name, which can differ from the
     # directory name.
     ensure_published
-    name=$(sed -n 's/^pkgname = //p' "$dir/.SRCINFO" 2>/dev/null | head -n 1)
-    [[ -n $name ]] || name=$pkg
-    if ! published_as "$name"; then
+    if ! package_published "$dir"; then
       log "$pkg: not in the published repository, scheduling a build"
       changed+=("$pkg")
     fi
   fi
 done < <(package_dirs "$root")
+
+# Published packages with no package directory are removals: a deleted directory
+# is not a rebuild. Reconciling this way also catches a deletion whose push run
+# was skipped because an older run was still going. The local name set is built
+# from every package, not just the ones this run considers, so filtering with
+# PACKAGES cannot make unrelated packages look deleted.
+removed=("${push_removals[@]}")
+all_names=()
+while IFS= read -r dir; do
+  while IFS= read -r name; do
+    # makepkg also ships a `<name>-debug` package from the same directory when
+    # debug is enabled, and that is a separate db entry of its own.
+    all_names+=("$name" "$name-debug")
+  done < <(package_names "$dir")
+done < <(package_dirs "$root")
+
+ensure_published
+if [[ $published_state == known ]]; then
+  while IFS= read -r name; do
+    [[ -n $name ]] || continue
+    contains "$name" "${all_names[@]}" && continue
+    log "$name: published but has no package directory, scheduling its removal"
+    removed+=("$name")
+  done <<<"$published"
+fi
+# A removed package's debug build has its own entry and files, so remove it too.
+# Only when the repository says it exists: not every package ships one.
+if [[ $published_state == known ]]; then
+  companions=()
+  for name in "${removed[@]}"; do
+    [[ $name == *-debug ]] && continue
+    published_as "$name-debug" && companions+=("$name-debug")
+  done
+  if ((${#companions[@]})); then
+    removed+=("${companions[@]}")
+  fi
+fi
+if ((${#removed[@]})); then
+  mapfile -t removed < <(printf '%s\n' "${removed[@]}" | sort -u)
+fi
 
 # Source packages whose published build may no longer match the Arch packages
 # it runs against. Packages built in this run are always tested; the rest are
@@ -188,9 +256,13 @@ emit "test_candidates=$test_candidates"
 emit "source_matrix=$source_matrix"
 emit "versions=$versions_json"
 emit "failed=$failed_csv"
+emit "removed=${removed[*]-}"
 
 if ((${#changed[@]})); then
   log "to build: ${changed[*]}"
 else
   log 'all packages are up to date'
+fi
+if ((${#removed[@]})); then
+  log "to remove from the repository: ${removed[*]}"
 fi

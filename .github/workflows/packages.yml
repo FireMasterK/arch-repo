@@ -92,6 +92,9 @@ jobs:
       # package -> pkgver, used to key the source-download cache.
       versions: ${{ steps.plan.outputs.versions }}
       failed: ${{ steps.plan.outputs.failed }}
+      # Packages to remove: the push's deleted directories plus published names
+      # with no directory left (reconciled on every run).
+      removed: ${{ steps.plan.outputs.removed }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -200,6 +203,10 @@ jobs:
           # every package, which is what a manual `force` run wants and what a
           # push that changed scripts/build-package.sh affects.
           FORCE_PACKAGES: ${{ steps.changed.outputs.packages }}
+          # Package names whose directories the push deleted. The planner also
+          # reconciles the published db against packages/, so a deletion whose
+          # push run was skipped is still removed.
+          REMOVED_FROM_PUSH: ${{ steps.changed.outputs.removed }}
           # Updaters that query the GitHub API use this for a higher rate limit.
           GITHUB_TOKEN: ${{ github.token }}
           # The plan reads the published repository so a package that has never
@@ -445,7 +452,8 @@ jobs:
     needs: [plan, build, smoke]
     if: >-
       always() &&
-      (needs.plan.outputs.has_updates == 'true' || needs.plan.outputs.has_tests == 'true') &&
+      (needs.plan.outputs.has_updates == 'true' || needs.plan.outputs.has_tests == 'true'
+       || needs.plan.outputs.removed != '') &&
       (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-latest
     container:
@@ -498,4 +506,7 @@ jobs:
           # With no upstream update the only artifacts are smoke-test rebuilds,
           # so an empty _artifacts means "nothing to do", not "build broke".
           EXPECT_ARTIFACTS: ${{ needs.plan.outputs.has_updates }}
+          # Package directories the push deleted; publish removes their db
+          # entries and published files.
+          REMOVED: ${{ needs.plan.outputs.removed }}
         run: bash "$GITHUB_WORKSPACE/scripts/container-publish.sh"
